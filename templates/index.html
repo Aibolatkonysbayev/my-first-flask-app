@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Приветствие от Бэкенда</title>
+    <style>
+        /* Простой CSS для минимального оформления */
+        body { font-family: sans-serif; margin: 20px; }
+        #result { margin-top: 15px; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <h1>Получить приветствие</h1>
+    <input type="text" id="nameInput" placeholder="Введите ваше имя">
+    <button id="greetButton">Приветствовать</button>
+    <div id="result"></div>
+
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>
