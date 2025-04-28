@@ -25,6 +25,10 @@ from openai import OpenAI, APIStatusError, APIConnectionError, RateLimitError # 
 import json # Может пригодиться для работы с JSON ответами от API
 # --- КОНЕЦ КОДА: Импорт для AI (Шаг 27) ---
 
+# --- НОВОЕ: Импорт UUID (Шаг 32.1) ---
+import uuid # Для создания уникальных идентификаторов файлов
+# --- КОНЕЦ НОВОГО: Импорт UUID (Шаг 32.1) ---
+
 
 # Создаем экземпляр приложения Flask
 app = Flask(__name__)
@@ -34,12 +38,12 @@ app.config['SECRET_KEY'] = 'xgj6_6mu,_j7kem_5_e5h7_ko69;_c25vl_vbj6_m,,l' # >>> 
 # --- КОНЕЦ НАСТРОЙКИ SECRET_KEY ---
 
 
-# --- НАЧАЛО КОДА: Конфигурация Папки Загрузки (Шаг 29.1) ---
+# --- КОНФИГУРАЦИЯ ПАПКИ ЗАГРУЗКИ (Шаг 29.1) ---
 UPLOAD_FOLDER = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'uploads')
 ALLOWED_EXTENSIONS = {'pdf', 'docx'}
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
-# --- КОНЕЦ КОДА: Конфигурация Папки Загрузки (Шаг 29.1) ---
+# --- КОНЕЦ КОНФИГУРАЦИИ ПАПКИ ЗАГРУЗКИ (Шаг 29.1) ---
 
 
 # --- КОД ДЛЯ БАЗЫ ДАННЫХ (Шаг 18) ---
@@ -60,8 +64,7 @@ def load_user(user_id):
     return User.query.get(int(user_id))
 # --- КОНЕЦ КОДА: Flask-Login (Шаг 20) ---
 
-# --- НАЧАЛО НОВОГО КОДА: Фильтр Jinja для JSON (Шаг 28.1) ---
-# Регистрируем фильтр from_json для шаблонов Jinja2
+# --- КОД: Фильтр Jinja для JSON (Шаг 28.1) ---
 @app.template_filter('from_json')
 def from_json_filter(json_string):
     if isinstance(json_string, str):
@@ -70,7 +73,7 @@ def from_json_filter(json_string):
         except (json.JSONDecodeError, TypeError):
             return None
     return json_string
-# --- КОНЕЦ НОВОГО КОДА: Фильтр Jinja для JSON (Шаг 28.1) ---
+# --- КОНЕЦ КОДА: Фильтр Jinja для JSON (Шаг 28.1) ---
 
 
 # --- КОД ДЛЯ МОДЕЛИ ПОЛЬЗОВАТЕЛЯ (Шаг 18, ИЗМЕНЕНО в Шаге 20, 21) ---
@@ -80,9 +83,7 @@ class User(db.Model, UserMixin):
     password = db.Column(db.String(60), nullable=False)
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
-    # --- Связь с вакансиями (Шаг 21, ИЗМЕНЕНО в Шаге 23) ---
     vacancies = db.relationship('Vacancy', backref='author', lazy=True, order_by="Vacancy.created_at.desc()")
-    # --- Конец Связи с вакансиями (Шаг 21, ИЗМЕНЕНО) ---
 
     def set_password(self, password):
         self.password = generate_password_hash(password)
@@ -93,8 +94,6 @@ class User(db.Model, UserMixin):
     def __repr__(self):
         return f"User('{self.email}')"
 
-# --- КОНЕЦ КОДА ДЛЯ МОДЕЛИ ПОЛЬЗОВАТЕЛЯ (Шаг 18, ИЗМЕНЕНО) ---
-
 
 # --- КОД ДЛЯ МОДЕЛИ ВАКАНСИИ (Шаг 21, ИЗМЕНЕНО в Шаге 25) ---
 class Vacancy(db.Model):
@@ -104,14 +103,11 @@ class Vacancy(db.Model):
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
 
-    # --- Связь с кандидатами (Шаг 25, ИЗМЕНЕНО в Шаге 25) ---
     candidates = db.relationship('Candidate', backref='vacancy', lazy=True, cascade='all, delete-orphan', order_by="Candidate.created_at.desc()")
-    # --- Конец Связи с кандидатами (Шаг 25, ИЗМЕНЕНО) ---
 
 
     def __repr__(self):
         return f"Vacancy('{self.title}', '{self.created_at}')"
-# --- КОНЕЦ КОДА ДЛЯ МОДЕЛИ ВАКАНСИИ (Шаг 21, ИЗМЕНЕНО) ---
 
 
 # --- КОД ДЛЯ МОДЕЛИ КАНДИДАТА (Шаг 25) ---
@@ -130,7 +126,6 @@ class Candidate(db.Model):
 
     def __repr__(self):
         return f"Candidate('{self.original_filename}', VacancyID:{self.vacancy_id}, Status:'{self.status}')"
-# --- КОНЕЦ КОДА ДЛЯ МОДЕЛИ КАНДИДАТА (Шаг 25) ---
 
 
 # --- КОД: Функции извлечения текста (Шаг 26) ---
@@ -141,6 +136,7 @@ def extract_text_from_pdf(pdf_content):
         with fitz.open(stream=pdf_content, filetype="pdf") as doc:
             for page in doc:
                 text += page.get_text()
+        print("Извлечение PDF текста успешно.")
     except Exception as e:
         print(f"Ошибка при извлечении текста из PDF: {e}")
         text = None
@@ -153,6 +149,7 @@ def extract_text_from_docx(docx_content):
         doc = Document(io.BytesIO(docx_content))
         for paragraph in doc.paragraphs:
             text += paragraph.text + "\n"
+        print("Извлечение DOCX текста успешно.")
     except Exception as e:
         print(f"Ошибка при извлечении текста из DOCX: {e}")
         text = None
@@ -161,12 +158,9 @@ def extract_text_from_docx(docx_content):
 def get_file_extension(filename):
     """Возвращает расширение файла в нижнем регистре."""
     return os.path.splitext(filename)[1].lower()
-# --- КОНЕЦ КОДА: Функции извлечения текста (Шаг 26) ---
 
 
-# --- КОД: Функция AI Скрининга (Шаг 27 - ИСПРАВЛЕНО для openai v1.0.0+) ---
-# Создаем клиент OpenAI здесь (один раз)
-# Ключ API берется из переменной окружения AI_API_KEY автоматически при инициализации клиента
+# --- КОД: Функция AI Скрининга (Шаг 27 - ИСПРАВЛЕНО для openai v1.0.0+, УЛУЧШЕНО в Шаге 32.1) ---
 try:
     ai_client = OpenAI(api_key=os.environ.get('AI_API_KEY'))
     print("OpenAI клиент инициализирован. Ключ API найден." if os.environ.get('AI_API_KEY') else "OpenAI клиент инициализирован. Ключ API НЕ найден.")
@@ -178,18 +172,19 @@ except Exception as e:
 
 def perform_ai_screening(candidate_id):
     """Выполняет AI-скрининг для заданного кандидата."""
-    # Важно получить кандидата в текущем контексте
     candidate = db.session.get(Candidate, candidate_id)
     if not candidate or not candidate.extracted_text:
         print(f"AI Screening: Кандидат с ID {candidate_id} не найден или текст не извлечен.")
+        # TODO: Обновить статус кандидата, если текст не извлечен, но запись создана
         return
 
     if candidate.status == 'processing':
         print(f"AI Screening: Кандидат ID {candidate_id} уже в процессе обработки.")
-        return # Не запускаем повторно
+        return
 
+    # Устанавливаем статус "в процессе" перед началом
     candidate.status = 'processing'
-    db.session.commit() # Сохраняем статус "в процессе"
+    db.session.commit()
 
     job = candidate.vacancy
     if not job:
@@ -203,9 +198,11 @@ def perform_ai_screening(candidate_id):
 
     if not ai_client:
         print(f"AI Screening: Клиент OpenAI не инициализирован (нет ключа). Кандидат ID {candidate_id} обработан не будет.")
-        candidate = db.session.get(Candidate, candidate.id) # Получаем объект еще раз в новой сессии, если commit был ранее
+        candidate = db.session.get(Candidate, candidate_id) # Получаем объект еще раз
         if candidate:
             candidate.status = 'failed_ai_nokey'
+            # Сохраняем информацию об ошибке в keywords
+            candidate.keywords = json.dumps({"error": "AI API key not configured or invalid."})
             db.session.commit()
         return
 
@@ -215,7 +212,7 @@ def perform_ai_screening(candidate_id):
         {"role": "user", "content": f"Описание Вакансии:\n---\n{job_description}\n---\n\nРезюме Кандидата:\n---\n{resume_text}\n---\n"},
     ]
 
-    # --- Вызов AI API (OpenAI) - ИСПРАВЛЕНО для openai v1.0.0+ ---
+    # --- Вызов AI API (OpenAI) ---
     try:
         response = ai_client.chat.completions.create(
             model="gpt-3.5-turbo", # или "gpt-4", "gpt-4-turbo-preview"
@@ -234,28 +231,28 @@ def perform_ai_screening(candidate_id):
 
         if isinstance(score, (int, float)) and 0 <= score <= 100:
             candidate.ai_score = float(score)
-            candidate.keywords = json.dumps(keywords) if isinstance(keywords, list) else None
+            candidate.keywords = json.dumps(keywords) if isinstance(keywords, list) else json.dumps({"keywords_format_error": keywords}) # Сохраняем список или ошибку формата ключей
             candidate.status = 'scored'
             print(f"AI Screening Успех для Кандидата {candidate.id}. Оценка: {candidate.ai_score}%. Статус: scored.")
         else:
             print(f"AI Screening Ошибка: AI вернул некорректный формат оценки для Кандидата {candidate.id}. Ответ: {ai_output_text}")
             candidate.status = 'failed_ai_format'
             candidate.ai_score = None
-            candidate.keywords = ai_output_text
+            candidate.keywords = json.dumps({"parsing_error": "Score format incorrect", "raw_response": ai_output_text}) # Сохраняем ошибку и raw ответ
             # TODO: Логировать ошибку формата
 
     except (APIStatusError, APIConnectionError, RateLimitError) as e:
         print(f"AI Screening Ошибка API для Кандидата {candidate.id}: {e}")
         candidate.status = f'failed_ai_api_{e.__class__.__name__}'
         candidate.ai_score = None
-        candidate.keywords = str(e)
+        candidate.keywords = json.dumps({"api_error": str(e)}) # Сохраняем ошибку API
         # TODO: Логировать ошибку API
 
     except json.JSONDecodeError as e:
         print(f"AI Screening Ошибка парсинга JSON для Кандидата {candidate.id}: {e}. Ответ AI: {ai_output_text}")
         candidate.status = 'failed_ai_format'
         candidate.ai_score = None
-        candidate.keywords = ai_output_text
+        candidate.keywords = json.dumps({"parsing_error": str(e), "raw_response": ai_output_text}) # Сохраняем ошибку парсинга и raw ответ
         # TODO: Логировать ошибку парсинга
 
     except Exception as e:
@@ -264,14 +261,14 @@ def perform_ai_screening(candidate_id):
         traceback.print_exc()
         candidate.status = 'failed_ai_unknown'
         candidate.ai_score = None
-        candidate.keywords = str(e)
+        candidate.keywords = json.dumps({"unknown_error": str(e), "traceback": traceback.format_exc()}) # Сохраняем ошибку и traceback
         # TODO: Логировать неизвестную ошибку
 
     finally:
         db.session.commit() # Важно сохранить изменения статуса и результатов
 
 
-# --- КОНЕЦ КОДА: Функция AI Скрининга (Шаг 27 - ИСПРАВЛЕНО) ---
+# --- КОНЕЦ КОДА: Функция AI Скрининга (Шаг 27 - ИСПРАВЛЕНО, УЛУЧШЕНО в Шаге 32.1) ---
 
 
 # Маршрут для отображения главной страницы
@@ -327,14 +324,13 @@ def view_job(job_id):
     if job.user_id != current_user.id:
         abort(403)
 
-    # Получаем список кандидатов (Шаг 28.1)
-    candidates = job.candidates
+    candidates = job.candidates # Получаем список кандидатов
 
-    # Передаем объект вакансии, пользователя И список кандидатов в шаблон
     return render_template('view_job.html', job=job, user=current_user, candidates=candidates)
 
 
-# Маршрут для загрузки резюме для конкретной вакансии (Шаг 26, ИЗМЕНЕНО в Шаге 27, 29.2)
+# Маршрут для загрузки резюме для конкретной вакансии (Шаг 26, ИЗМЕНЕНО в Шаге 27, 29.2, 32.1)
+# --- НАЧАЛО ИЗМЕНЕНИЙ для Шага 32.1 (Уникальное имя файла) ---
 @app.route('/jobs/<int:job_id>/upload_resume', methods=['POST'])
 @login_required
 def upload_resume(job_id):
@@ -360,18 +356,17 @@ def upload_resume(job_id):
          flash(f'Неподдерживаемый формат файла: {file_extension}. Разрешены только {", ".join(ALLOWED_EXTENSIONS)}.', 'error')
          return redirect(url_for('view_job', job_id=job.id))
 
-    # --- Сохранение файла на диске (Шаг 29.2) ---
-    # TODO: Использовать уникальные имена файлов, чтобы избежать перезаписи!
-    # Например: unique_filename = f"{uuid.uuid4()}_{original_filename}"
-    # from uuid import uuid4
-    file_path = os.path.join(app.config['UPLOAD_FOLDER'], original_filename)
+    # --- Сохранение файла на диске (Шаг 29.2, ИЗМЕНЕНО для Шага 32.1) ---
+    # Генерируем уникальное имя файла с сохранением расширения
+    unique_filename = str(uuid.uuid4()) + file_extension # Используем uuid
+    file_path = os.path.join(app.config['UPLOAD_FOLDER'], unique_filename) # Используем уникальное имя для пути
 
     try:
-        file.save(file_path)
-        storage_path = original_filename # В базе пока храним только имя файла относительно папки uploads
-        print(f"Файл {original_filename} сохранен в {file_path}")
+        file.save(file_path) # Сохраняем файл под уникальным именем
+        storage_path = unique_filename # В базе храним уникальное имя
+        print(f"Файл {original_filename} сохранен как {unique_filename} в {file_path}") # Логируем оба имени
     except Exception as e:
-        print(f"Ошибка при сохранении файла {original_filename}: {e}")
+        print(f"Ошибка при сохранении файла {original_filename} как {unique_filename}: {e}")
         flash(f'Не удалось сохранить файл {original_filename}.', 'error')
         return redirect(url_for('view_job', job_id=job.id))
 
@@ -387,23 +382,28 @@ def upload_resume(job_id):
             extracted_text = extract_text_from_docx(file_content)
 
         if not extracted_text or len(extracted_text.strip()) == 0:
-             print(f"Извлечен пустой текст из файла {original_filename}. Удаляем файл.")
-             os.remove(file_path)
+             print(f"Извлечен пустой текст из файла {original_filename} ({unique_filename}). Удаляем файл.")
+             os.remove(file_path) # Удаляем файл при пустом тексте
              flash(f'Не удалось извлечь текст или текст пуст из файла {original_filename}.', 'error')
+             # TODO: Можно создать кандидата со статусом extraction_failed
              return redirect(url_for('view_job', job_id=job.id))
     except Exception as e:
-        print(f"Ошибка при извлечении текста из сохраненного файла {original_filename}: {e}")
-        os.remove(file_path)
+        print(f"Ошибка при извлечении текста из сохраненного файла {original_filename} ({unique_filename}): {e}")
+        os.remove(file_path) # Удаляем файл при ошибке извлечения
         flash(f'Ошибка при извлечении текста из файла {original_filename}.', 'error')
+        # TODO: Логировать
         return redirect(url_for('view_job', job_id=job.id))
 
     # --- Сохранение кандидата в базу данных (Шаг 26, ИЗМЕНЕНО для Шага 29.2) ---
-    # !!! TODO: Проверить на дубликаты по имени файла и вакансии, или добавить UUID !!!
+    # Проверяем на дубликаты по ОРИГИНАЛЬНОМУ имени файла и вакансии (если хотим предотвратить загрузку одного и того же файла несколько раз)
+    # Т.к. теперь имена файлов на диске уникальны, дубликаты в БД по storage_path не возникнут из-за перезаписи файла
+    # Но дубликаты в БД по original_filename + vacancy_id возможны.
     existing_candidate = Candidate.query.filter_by(vacancy_id=job.id, original_filename=original_filename).first()
 
     if existing_candidate:
         print(f"Кандидат с именем файла {original_filename} для вакансии {job.id} уже существует. Обновляем его.")
         candidate_to_process = existing_candidate
+        # Обновляем поля, даже если файл перезаписался с уникальным именем
         candidate_to_process.storage_path = storage_path
         candidate_to_process.extracted_text = extracted_text
         candidate_to_process.status = 'uploaded' # Сбрасываем статус для повторной обработки
@@ -421,9 +421,10 @@ def upload_resume(job_id):
         db.session.add(new_candidate)
         candidate_to_process = new_candidate
 
-    db.session.commit()
+    db.session.commit() # Сохраняем изменения или нового кандидата
 
     # --- Запуск AI Скрининга после сохранения (Шаг 27) ---
+    # TODO: Для продакшена, возможно, использовать асинхронную очередь задач (Celery)
     print(f"Кандидат {candidate_to_process.id} создан/обновлен. Запускаем AI скрининг...")
     try:
         perform_ai_screening(candidate_to_process.id)
@@ -436,8 +437,10 @@ def upload_resume(job_id):
              candidate_failed.keywords = str(e)
              db.session.commit()
 
+
     flash(f'Резюме "{original_filename}" загружено и обработка завершена (см. статус кандидата ниже).', 'success')
     return redirect(url_for('view_job', job_id=job.id))
+# --- КОНЕЦ ИЗМЕНЕНИЙ для Шага 32.1 (Уникальное имя файла) ---
 
 
 # --- КОД: Маршрут Скачивания Резюме (Шаг 29.3) ---
@@ -448,19 +451,21 @@ def download_resume(candidate_id):
 
     job = candidate.vacancy
     if not job:
-         print(f"Ошибка: Вакансия для кандидата {candidate_id} не найдена при попытке скачивания.")
+         print(f"Ошибка: Вакансия для кандидата {candidate.id} не найдена при попытке скачивания.")
          abort(404)
 
     if job.user_id != current_user.id:
-        print(f"Ошибка доступа: Пользователь {current_user.id} пытается скачать резюме {candidate_id} чужой вакансии {job.id}.")
+        print(f"Ошибка доступа: Пользователь {current_user.id} пытается скачать резюме {candidate.id} чужой вакансии {job.id}.")
         abort(403)
 
+    # Теперь используем storage_path, который является уникальным именем файла
     if not candidate.storage_path:
         print(f"Ошибка: Для кандидата {candidate.id} не указан storage_path.")
         abort(404)
 
     try:
-        return send_from_directory(app.config['UPLOAD_FOLDER'], candidate.storage_path, as_attachment=True)
+        # Используем уникальное имя файла (storage_path) для скачивания
+        return send_from_directory(app.config['UPLOAD_FOLDER'], candidate.storage_path, as_attachment=True, download_name=candidate.original_filename) # <<< Добавил download_name
     except FileNotFoundError:
         print(f"Ошибка: Файл не найден на диске по пути {os.path.join(app.config['UPLOAD_FOLDER'], candidate.storage_path)} для кандидата {candidate.id}.")
         abort(404)
@@ -482,9 +487,9 @@ def view_extracted_text(candidate_id):
         abort(403)
 
     return render_template('view_extracted_text.html', candidate=candidate, user=current_user)
-# --- КОНЕЦ КОДА: Маршрут Просмотра Извлеченного Текста (Шаг 30.2) ---
 
-# --- НАЧАЛО НОВОГО КОДА: Маршрут Ручного Запуска AI Скрининга (Шаг 31.1) ---
+
+# --- КОД: Маршрут Ручного Запуска AI Скрининга (Шаг 31.1) ---
 @app.route('/candidates/<int:candidate_id>/rescreen', methods=['POST'])
 @login_required
 def rescreen_candidate(candidate_id):
@@ -514,7 +519,6 @@ def rescreen_candidate(candidate_id):
          flash(f'Произошла ошибка при запуске AI скрининга для "{candidate.original_filename}".', 'error')
 
     return redirect(url_for('view_job', job_id=job.id))
-# --- КОНЕЦ НОВОГО КОДА: Маршрут Ручного Запуска AI Скрининга (Шаг 31.1) ---
 
 
 # Маршрут для РЕГИСТРАЦИИ (Шаг 19)
@@ -570,7 +574,7 @@ def login():
         if user and user.check_password(password):
             login_user(user)
             flash('Вы успешно вошли в систему!', 'success')
-            return redirect(url_for('list_jobs'))
+            return redirect(url_for('list_jobs')) # Перенаправляем на список вакансий после входа
 
         else:
             flash('Неверный email или пароль.', 'error')
