@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Вход HR Пользователя</title>
+    <style>
+        body { font-family: sans-serif; margin: 20px; }
+        form div { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; }
+        input[type="email"], input[type="password"] {
+            width: 250px;
+            padding: 8px;
+            border: 1px solid #ccc;
+            box-sizing: border-box;
+        }
+        button {
+            padding: 10px 15px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+        .flash-messages {
+            list-style: none;
+            padding: 0;
+            margin-bottom: 15px;
+        }
+        .flash-messages li {
+            padding: 10px;
+            margin-bottom: 5px;
+            border-radius: 4px;
+        }
+        .flash-messages .success {
+            background-color: #d4edda;
+            color: #155724;
+            border-color: #c3e6cb;
+        }
+        .flash-messages .error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border-color: #f5c6cb;
+        }
+    </style>
+</head>
+<body>
+    <h1>Вход HR Пользователя</h1>
+
+    {# Сообщения от бэкенда #}
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            <ul class="flash-messages">
+            {% for category, message in messages %}
+                <li class="{{ category }}">{{ message }}</li>
+            {% endfor %}
+            </ul>
+        {% endif %}
+    {% endwith %}
+
+    {# Форма для отправки данных входа методом POST на URL /login #}
+    <form method="POST" action="{{ url_for('login') }}">
+        <div>
+            <label for="email">Email:</label>
+            <input type="email" id="email" name="email" required>
+        </div>
+        <div>
+            <label for="password">Пароль:</label>
+            <input type="password" id="password" name="password" required>
+        </div>
+        {# Можно добавить чекбокс "Запомнить меня", но для MVP пропустим #}
+        <button type="submit">Войти</button>
+    </form>
+
+    <p>Ещё не зарегистрированы? <a href="{{ url_for('register') }}">Зарегистрироваться</a></p> {# Ссылка на страницу регистрации #}
+
+</body>
+</html>

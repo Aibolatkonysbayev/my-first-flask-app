@@ -3,18 +3,51 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Приветствие от Бэкенда</title>
+    <title>Адаптация Резюме с ИИ</title>
     <style>
-        /* Простой CSS для минимального оформления */
         body { font-family: sans-serif; margin: 20px; }
-        #result { margin-top: 15px; font-weight: bold; }
+        textarea {
+            width: 95%; /* Ширина текстовых полей */
+            height: 150px; /* Высота текстовых полей */
+            margin-bottom: 15px; /* Отступ снизу */
+            padding: 10px;
+            border: 1px solid #ccc;
+            box-sizing: border-box; /* Учитываем padding и border в ширине */
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+        #result {
+            margin-top: 20px;
+            padding: 15px;
+            border: 1px solid #eee;
+            background-color: #f9f9f9;
+            white-space: pre-wrap; /* Сохраняем переносы строк из текста */
+            word-wrap: break-word; /* Переносим длинные слова */
+        }
+        .loading {
+            color: blue;
+        }
+        .error {
+            color: red;
+        }
     </style>
 </head>
 <body>
-    <h1>Получить приветствие</h1>
-    <input type="text" id="nameInput" placeholder="Введите ваше имя">
-    <button id="greetButton">Приветствовать</button>
-    <div id="result"></div>
+    <h1>Адаптация Резюме с помощью ИИ</h1>
+
+    <h2>Ваше Резюме</h2>
+    <textarea id="resumeInput" placeholder="Вставьте текст вашего резюме сюда"></textarea>
+
+    <h2>Описание Вакансии</h2>
+    <textarea id="jobDescriptionInput" placeholder="Вставьте текст описания вакансии сюда"></textarea>
+
+    <button id="adaptButton">Адаптировать Резюме</button>
+
+    <h2>Результат</h2>
+    <div id="result">Здесь появится адаптированное резюме.</div>
 
     <script src="{{ url_for('static', filename='script.js') }}"></script>
 </body>

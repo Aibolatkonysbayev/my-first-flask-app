@@ -1,50 +1,61 @@
-// Ждем полной загрузки HTML-документа
 document.addEventListener('DOMContentLoaded', () => {
-    // Находим элементы на странице по их ID
-    const nameInput = document.getElementById('nameInput');
-    const greetButton = document.getElementById('greetButton');
+    // Находим новые элементы на странице по их ID
+    const resumeInput = document.getElementById('resumeInput');
+    const jobDescriptionInput = document.getElementById('jobDescriptionInput');
+    const adaptButton = document.getElementById('adaptButton'); // ID кнопки изменился
     const resultDiv = document.getElementById('result');
 
-    // Добавляем "слушателя" события клика на кнопку
-    greetButton.addEventListener('click', async () => {
-        // Получаем значение из поля ввода
-        const name = nameInput.value;
+    // Добавляем "слушателя" события клика на новую кнопку
+    adaptButton.addEventListener('click', async () => {
+        // Получаем текст из обоих текстовых полей
+        const resumeText = resumeInput.value;
+        const jobDescriptionText = jobDescriptionInput.value;
 
-        if (!name) {
-            resultDiv.textContent = 'Пожалуйста, введите имя!';
-            return; // Если имя не введено, прекращаем выполнение
+        // Простая проверка на заполненность
+        if (!resumeText || !jobDescriptionText) {
+            resultDiv.className = 'error'; // Добавляем класс для стилизации ошибки
+            resultDiv.textContent = 'Пожалуйста, вставьте и резюме, и описание вакансии.';
+            return;
         }
 
-        // Очищаем предыдущий результат
-        resultDiv.textContent = 'Загрузка...';
+        resultDiv.className = 'loading'; // Добавляем класс для стилизации загрузки
+        resultDiv.textContent = 'Отправка данных на бэкенд...';
 
         try {
-            // Отправляем POST-запрос на адрес /greet нашего бэкенда
-            // Указываем метод POST, тип содержимого JSON
-            // В теле запроса отправляем объект с именем
-            const response = await fetch('/greet', {
+            // Отправляем POST-запрос на адрес /greet (пока используем старый маршрут)
+            // В теле запроса отправляем ОБЪЕКТ с обоими текстами
+            const response = await fetch('/greet', { // Пока отправляем на /greet
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify({ name: name }) // Преобразуем JavaScript объект в строку JSON
+                // Отправляем оба поля в одном JSON объекте
+                body: JSON.stringify({
+                    resume_text: resumeText,
+                    job_description_text: jobDescriptionText
+                })
             });
 
-            // Проверяем, успешен ли был HTTP-ответ (код 2xx)
+            // Проверяем статус ответа
             if (!response.ok) {
-                throw new Error(`Ошибка HTTP: ${response.status}`);
+                 const errorText = await response.text(); // Попытаемся получить текст ошибки от сервера
+                 throw new Error(`Ошибка HTTP: ${response.status} - ${errorText}`);
             }
 
             // Парсим JSON-ответ от бэкенда
             const data = await response.json();
 
-            // Выводим полученное приветствие в блок result
-            resultDiv.textContent = `Бэкенд ответил: ${data.greeting}`;
+            // TODO: Здесь будет отображаться адаптированное резюме от ИИ
+            // Пока что бэкенд вернет просто подтверждение
+            resultDiv.className = ''; // Убираем классы загрузки/ошибки
+            // Ожидаем, что бэкенд вернет объект типа {"status": "received", ...}
+            resultDiv.textContent = `Бэкенд успешно получил данные. Ответ: ${JSON.stringify(data, null, 2)}`; // Выводим весь ответ для отладки
 
         } catch (error) {
-            // Обрабатываем ошибки (например, если бэкенд недоступен)
+            // Обрабатываем ошибки запроса
             console.error('Ошибка при запросе к бэкенду:', error);
-            resultDiv.textContent = `Произошла ошибка: ${error.message}`;
+            resultDiv.className = 'error';
+            resultDiv.textContent = `Произошла ошибка при отправке данных: ${error.message}`;
         }
     });
 });
