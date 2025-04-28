@@ -1,5 +1,5 @@
 # Импортируем необходимые классы из Flask
-from flask import Flask, request, jsonify, render_template, redirect, url_for, flash, abort, current_app
+from flask import Flask, request, jsonify, render_template, redirect, url_for, flash, abort, current_app, send_from_directory # Добавляем send_from_directory
 # Импортируем библиотеку os для работы с переменными окружения
 import os
 # --- КОД ДЛЯ БАЗЫ ДАННЫХ (Шаг 18) ---
@@ -19,12 +19,11 @@ from docx import Document # python-docx для DOCX
 import io
 # --- КОНЕЦ КОДА: Импорты для файлов и извлечения текста (Шаг 26) ---
 
-# --- НАЧАЛО НОВОГО КОДА: Импорт для AI (Шаг 27 - ИСПРАВЛЕНО для openai v1.0.0+) ---
-# Импортируем новый клиент OpenAI и конкретные классы ошибок
+# --- КОД: Импорт для AI (Шаг 27) ---
 import openai
 from openai import OpenAI, APIStatusError, APIConnectionError, RateLimitError # Импорты ошибок для v1.0.0+
 import json # Может пригодиться для работы с JSON ответами от API
-# --- КОНЕЦ НОВОГО КОДА: Импорт для AI (Шаг 27 - ИСПРАВЛЕНО) ---
+# --- КОНЕЦ КОДА: Импорт для AI (Шаг 27) ---
 
 
 # Создаем экземпляр приложения Flask
@@ -33,6 +32,21 @@ app = Flask(__name__)
 # --- НАСТРОЙКА SECRET_KEY (Шаг 19) ---
 app.config['SECRET_KEY'] = 'xgj6_6mu,_j7kem_5_e5h7_ko69;_c25vl_vbj6_m,,l' # >>> ОБЯЗАТЕЛЬНО ЗАМЕНИ НА СВОЮ <<<
 # --- КОНЕЦ НАСТРОЙКИ SECRET_KEY ---
+
+
+# --- НАЧАЛО НОВОГО КОДА: Конфигурация Папки Загрузки (Шаг 29.1) ---
+# Определяем путь к папке для хранения загруженных файлов
+# os.path.abspath(os.path.dirname(__file__)) - это путь к папке, где находится app.py (корень проекта)
+UPLOAD_FOLDER = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'uploads')
+# Разрешенные расширения файлов (уже определены в логике ниже, но для конфигурации тоже полезно)
+ALLOWED_EXTENSIONS = {'pdf', 'docx'}
+
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+
+# Убедимся, что папка для загрузки существует при запуске приложения
+# Это можно делать здесь или при первом использовании, но здесь надежнее
+os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+# --- КОНЕЦ НОВОГО КОДА: Конфигурация Папки Загрузки (Шаг 29.1) ---
 
 
 # --- КОД ДЛЯ БАЗЫ ДАННЫХ (Шаг 18) ---
@@ -112,7 +126,7 @@ class Candidate(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     vacancy_id = db.Column(db.Integer, db.ForeignKey('vacancy.id'), nullable=False)
     original_filename = db.Column(db.String(255), nullable=False)
-    storage_path = db.Column(db.String(255), nullable=True)
+    storage_path = db.Column(db.String(255), nullable=True) # Путь, где хранится сам файл (опционально)
     extracted_text = db.Column(db.Text, nullable=True)
 
     ai_score = db.Column(db.Float, nullable=True)
@@ -157,14 +171,14 @@ def get_file_extension(filename):
 # --- КОНЕЦ КОДА: Функции извлечения текста (Шаг 26) ---
 
 
-# --- НАЧАЛО НОВОГО КОДА: Функция AI Скрининга (Шаг 27 - ИСПРАВЛЕНО для openai v1.0.0+) ---
-# Создаем клиент OpenAI здесь (один раз), а не внутри функции
+# --- КОД: Функция AI Скрининга (Шаг 27 - ИСПРАВЛЕНО для openai v1.0.0+) ---
+# Создаем клиент OpenAI здесь (один раз)
 # Ключ API берется из переменной окружения AI_API_KEY автоматически при инициализации клиента
 try:
     ai_client = OpenAI(api_key=os.environ.get('AI_API_KEY'))
     print("OpenAI клиент инициализирован. Ключ API найден." if os.environ.get('AI_API_KEY') else "OpenAI клиент инициализирован. Ключ API НЕ найден.")
 except Exception as e:
-     ai_client = None # Клиент не будет создан, если ключ невалиден или ошибка
+     ai_client = None
      print(f"Ошибка инициализации OpenAI клиента: {e}")
      print("AI Screening будет недоступен.")
 
@@ -174,27 +188,25 @@ def perform_ai_screening(candidate_id):
     # Вызов этой функции должен выполняться в контексте приложения Flask,
     # если она обращается к db или моделям.
 
-    # Если клиент AI не был создан (например, нет ключа), сразу отмечаем ошибку
     if not ai_client:
         print(f"AI Screening: Клиент OpenAI не инициализирован. Кандидат ID {candidate_id} обработан не будет.")
         candidate = db.session.get(Candidate, candidate_id)
         if candidate:
-            candidate.status = 'failed_ai_nokey' # Используем тот же статус ошибки ключа
-            # flash("Ошибка AI: Не настроен или невалиден API ключ.", 'error') # Flash не работает здесь
-            db.session.commit()
+            candidate.status = 'failed_ai_nokey'
+            db.session.commit() # Сохраняем статус ошибки ключа
         return
 
-    # Важно получить кандидата в текущем контексте
     candidate = db.session.get(Candidate, candidate_id)
     if not candidate or not candidate.extracted_text:
         print(f"AI Screening: Кандидат с ID {candidate_id} не найден или текст не извлечен.")
-        return # Нечего обрабатывать
+        # TODO: Обновить статус кандидата, если текст не извлечен, но запись создана
+        return
 
     # Обновляем статус на "в процессе", прежде чем начать долгую операцию
     candidate.status = 'processing'
     db.session.commit() # Сохраняем статус "в процессе"
 
-    job = candidate.vacancy
+    job = candidate.vacancy # Получаем вакансию через relation
     if not job:
         print(f"AI Screening: Вакансия для кандидата {candidate_id} не найдена.")
         candidate.status = 'failed_ai_novacancy'
@@ -213,64 +225,39 @@ def perform_ai_screening(candidate_id):
 
     # --- Вызов AI API (OpenAI) - ИСПРАВЛЕНО для openai v1.0.0+ ---
     try:
-        # Теперь вызываем через объект клиента и используем .create() для чатов
         response = ai_client.chat.completions.create(
             model="gpt-3.5-turbo", # или "gpt-4", "gpt-4-turbo-preview"
             messages=prompt_messages,
             temperature=0.0,
             max_tokens=500,
-            # response_format={"type": "json_object"}, # Эта опция требует новых моделей
         )
 
-        ai_output_text = response.choices[0].message.content # Доступ к содержимому изменился
-
+        ai_output_text = response.choices[0].message.content
         print(f"AI Response Text for Candidate {candidate.id}: {ai_output_text}")
 
-        # Попытка парсить JSON из строки.
         ai_result = json.loads(ai_output_text)
 
         score = ai_result.get('relevance_score')
         keywords = ai_result.get('matching_keywords')
 
-        # Валидируем полученные данные
         if isinstance(score, (int, float)) and 0 <= score <= 100:
             candidate.ai_score = float(score)
             candidate.keywords = json.dumps(keywords) if isinstance(keywords, list) else None
-            candidate.status = 'scored' # Статус: успешно оценено
+            candidate.status = 'scored'
             print(f"AI Screening Успех для Кандидата {candidate.id}. Оценка: {candidate.ai_score}%. Статус: scored.")
         else:
             print(f"AI Screening Ошибка: AI вернул некорректный формат оценки для Кандидата {candidate.id}. Ответ: {ai_output_text}")
-            candidate.status = 'failed_ai_format' # Статус: ошибка формата ответа AI
+            candidate.status = 'failed_ai_format'
             candidate.ai_score = None
-            candidate.keywords = ai_output_text # Сохраним raw ответ для анализа
+            candidate.keywords = ai_output_text
             # TODO: Логировать
 
-    # --- Обработка Ошибок API - ИСПРАВЛЕНО для openai v1.0.0+ ---
-    except APIStatusError as e:
-        # Обработка ошибок, связанных со статусом HTTP (4xx, 5xx)
-        print(f"AI Screening Ошибка HTTP API для Кандидата {candidate.id}: {e.status_code} - {e.response.text}")
-        candidate.status = f'failed_ai_http_{e.status_code}' # Более специфичный статус
-        candidate.ai_score = None
-        candidate.keywords = str(e) # Сохраним текст ошибки
-        # Особо обрабатываем 401 (неавторизован) и 429 (лимит запросов)
-        if e.status_code == 401:
-             candidate.status = 'failed_ai_auth'
-        elif e.status_code == 429:
-             candidate.status = 'failed_ai_ratelimit'
-
-    except APIConnectionError as e:
-        # Обработка ошибок подключения к API
-        print(f"AI Screening Ошибка подключения API для Кандидата {candidate.id}: {e}")
-        candidate.status = 'failed_ai_connection'
+    except (APIStatusError, APIConnectionError, RateLimitError) as e: # Обработка основных ошибок API
+        print(f"AI Screening Ошибка API для Кандидата {candidate.id}: {e}")
+        candidate.status = f'failed_ai_api_{e.__class__.__name__}' # Статус с типом ошибки
         candidate.ai_score = None
         candidate.keywords = str(e)
-
-    except RateLimitError as e:
-        # Обработка ошибки превышения лимита запросов (на всякий случай, может быть частью APIStatusError)
-        print(f"AI Screening Ошибка Rate Limit для Кандидата {candidate.id}: {e}")
-        candidate.status = 'failed_ai_ratelimit'
-        candidate.ai_score = None
-        candidate.keywords = str(e)
+        # TODO: Логировать
 
     except json.JSONDecodeError as e:
         print(f"AI Screening Ошибка парсинга JSON для Кандидата {candidate.id}: {e}. Ответ AI: {ai_output_text}")
@@ -289,11 +276,10 @@ def perform_ai_screening(candidate_id):
         # TODO: Логировать
 
     finally:
-        # Важно сохранить изменения статуса и результатов, даже если произошла ошибка
-        db.session.commit()
+        db.session.commit() # Важно сохранить изменения статуса и результатов
 
 
-# --- КОНЕЦ НОВОГО КОДА: Функция AI Скрининга (Шаг 27 - ИСПРАВЛЕНО) ---
+# --- КОНЕЦ КОДА: Функция AI Скрининга (Шаг 27 - ИСПРАВЛЕНО) ---
 
 
 # Маршрут для отображения главной страницы
@@ -308,7 +294,7 @@ def index():
 @app.route('/jobs')
 @login_required
 def list_jobs():
-    user_vacancies = current_user.vacancies # Вакансии уже отсортированы по дате создания по умолчанию
+    user_vacancies = current_user.vacancies
 
     return render_template('list_jobs.html', jobs=user_vacancies, user=current_user)
 
@@ -357,6 +343,7 @@ def view_job(job_id):
 
 
 # Маршрут для загрузки резюме для конкретной вакансии (Шаг 26, ИЗМЕНЕНО в Шаге 27)
+# --- НАЧАЛО ИЗМЕНЕНИЙ для Шага 29.2 (Сохранение файла) ---
 @app.route('/jobs/<int:job_id>/upload_resume', methods=['POST'])
 @login_required
 def upload_resume(job_id):
@@ -378,48 +365,127 @@ def upload_resume(job_id):
     original_filename = secure_filename(file.filename)
     file_extension = get_file_extension(original_filename)
 
-    if file_extension not in ['.pdf', '.docx']:
-        flash('Неподдерживаемый формат файла. Разрешены только .pdf и .docx.', 'error')
+    # Проверяем, поддерживается ли формат файла (используем наш список ALLOWED_EXTENSIONS)
+    if file_extension.strip('.') not in ALLOWED_EXTENSIONS: # Убираем точку из расширения для проверки
+         flash(f'Неподдерживаемый формат файла: {file_extension}. Разрешены только {", ".join(ALLOWED_EXTENSIONS)}.', 'error')
+         return redirect(url_for('view_job', job_id=job.id))
+
+    # --- Сохранение файла на диске (Шаг 29.2) ---
+    # Определяем путь для сохранения файла
+    # Используем оригинальное имя файла, но secure_filename делает его безопасным
+    # Добавляем уникальный префикс (например, UUID или ID кандидата после сохранения)
+    # чтобы избежать конфликтов имен файлов, но для MVP пока просто используем имя
+    # В реальной жизни нужно использовать более надежный способ генерации имени файла!
+    # Например: unique_filename = f"{uuid.uuid4()}_{original_filename}"
+    # from uuid import uuid4
+
+    # Для MVP просто сохраним с исходным именем в папку uploads
+    # Это может привести к перезаписи файлов с одинаковым именем!
+    file_path = os.path.join(app.config['UPLOAD_FOLDER'], original_filename)
+
+    try:
+        file.save(file_path) # Сохраняем файл на диск
+        storage_path = original_filename # В базе будем хранить только имя файла относительно папки uploads
+        print(f"Файл {original_filename} сохранен в {file_path}") # Логируем успешное сохранение
+    except Exception as e:
+        print(f"Ошибка при сохранении файла {original_filename}: {e}")
+        flash(f'Не удалось сохранить файл {original_filename}.', 'error')
+        # TODO: Логировать ошибку сохранения
         return redirect(url_for('view_job', job_id=job.id))
 
+    # --- Извлечение текста из сохраненного файла (Шаг 26) ---
+    # Теперь читаем текст из сохраненного файла, а не из памяти
     extracted_text = None
-    file_content = file.read()
+    try:
+        # file_content = file.read() # Больше не нужно читать из MemoryIO здесь
+        # Читаем файл снова с диска
+        with open(file_path, 'rb') as f: # Открываем файл в бинарном режиме
+             file_content = f.read()
 
-    if file_extension == '.pdf':
-        extracted_text = extract_text_from_pdf(file_content)
-    elif file_extension == '.docx':
-        extracted_text = extract_text_from_docx(file_content)
+        if file_extension == '.pdf':
+            extracted_text = extract_text_from_pdf(file_content)
+        elif file_extension == '.docx':
+            extracted_text = extract_text_from_docx(file_content)
 
-    if not extracted_text or len(extracted_text.strip()) == 0:
-        flash(f'Не удалось извлечь текст или текст пуст из файла {original_filename}.', 'error')
-        # TODO: Можно сохранить кандидата со статусом extraction_failed
+        if not extracted_text or len(extracted_text.strip()) == 0:
+             print(f"Извлечен пустой текст из файла {original_filename}. Удаляем файл.")
+             # Удаляем сохраненный файл, если извлечение текста провалилось или текст пуст
+             os.remove(file_path)
+             flash(f'Не удалось извлечь текст или текст пуст из файла {original_filename}.', 'error')
+             # TODO: Логировать ошибку извлечения текста
+             # TODO: Возможно, создать кандидата со статусом extraction_failed
+             return redirect(url_for('view_job', job_id=job.id))
+    except Exception as e:
+        print(f"Ошибка при извлечении текста из сохраненного файла {original_filename}: {e}")
+        # Удаляем сохраненный файл при ошибке извлечения
+        os.remove(file_path)
+        flash(f'Ошибка при извлечении текста из файла {original_filename}.', 'error')
+        # TODO: Логировать ошибку извлечения текста
+        # TODO: Возможно, создать кандидата со статусом extraction_failed
         return redirect(url_for('view_job', job_id=job.id))
 
+
+    # --- Сохранение кандидата в базу данных (Шаг 26, ИЗМЕНЕНО для Шага 29.2) ---
     # !!! TODO: Проверить на дубликаты по имени файла и вакансии, или добавить UUID !!!
 
     new_candidate = Candidate(
         vacancy_id=job.id,
         original_filename=original_filename,
+        storage_path=storage_path, # Сохраняем путь к файлу
         extracted_text=extracted_text,
         status='uploaded'
     )
 
     db.session.add(new_candidate)
-    db.session.commit() # Сохраняем кандидата, чтобы у него появился ID в БД
+    db.session.commit()
 
     # --- Запуск AI Скрининга после сохранения (Шаг 27) ---
     print(f"Кандидат {new_candidate.id} создан. Запускаем AI скрининг...")
-    # Важно выполнить в контексте приложения, т.к. perform_ai_screening обращается к БД.
-    # current_app уже доступен в контексте запроса.
-    # Если это синхронный вызов, контекст запроса уже есть.
-    # Если это асинхронный вызов (TODO), потребуется app.app_context()
-    perform_ai_screening(new_candidate.id) # Вызываем функцию скрининга
+    perform_ai_screening(new_candidate.id)
     # --- Конец Запуск AI Скрининга (Шаг 27) ---
 
 
-    # Flash сообщение после завершения всего процесса (включая синхронный AI скрининг)
-    flash(f'Резюме "{original_filename}" загружено и обработка завершена (см. статус кандидата ниже).', 'success') # Изменяем сообщение
+    flash(f'Резюме "{original_filename}" загружено и обработка завершена (см. статус кандидата ниже).', 'success')
     return redirect(url_for('view_job', job_id=job.id))
+# --- КОНЕЦ ИЗМЕНЕНИЙ для Шага 29.2 (Сохранение файла) ---
+
+
+# --- НАЧАЛО НОВОГО КОДА: Маршрут Скачивания Резюме (Шаг 29.3) ---
+# Маршрут для безопасной отдачи файла резюме
+@app.route('/candidates/<int:candidate_id>/download_resume')
+@login_required # Только авторизованные пользователи могут скачивать
+def download_resume(candidate_id):
+    # Находим кандидата по ID
+    candidate = Candidate.query.get_or_404(candidate_id)
+
+    # Получаем вакансию, связанную с кандидатом, чтобы проверить права доступа
+    job = candidate.vacancy
+    if not job:
+         # Это маловероятно при правильных данных, но проверка не помешает
+         print(f"Ошибка: Вакансия для кандидата {candidate_id} не найдена при попытке скачивания.")
+         abort(404) # Кандидат есть, но вакансии нет - странная ситуация, вернем 404 или 500
+
+    # ВАЖНАЯ ПРОВЕРКА: Убеждаемся, что текущий пользователь является автором ВАКАНСИИ этого кандидата
+    if job.user_id != current_user.id:
+        print(f"Ошибка доступа: Пользователь {current_user.id} пытается скачать резюме {candidate_id} чужой вакансии {job.id}.")
+        abort(403) # 403 Forbidden - Нельзя скачивать чужие резюме
+
+    # Проверяем, есть ли путь к файлу для этого кандидата
+    if not candidate.storage_path:
+        print(f"Ошибка: Для кандидата {candidate_id} не указан storage_path.")
+        abort(404) # Файл не был сохранен или путь не записан
+
+    # Используем send_from_directory для безопасной отдачи файла
+    # Первый аргумент - директория, ОТНОСИТЕЛЬНО которой находится файл (UPLOAD_FOLDER)
+    # Второй аргумент - имя файла, КОТОРОЕ ЗАПИСАНО В БД (candidate.storage_path)
+    try:
+        # filename=candidate.storage_path - это имя файла внутри папки UPLOAD_FOLDER
+        return send_from_directory(app.config['UPLOAD_FOLDER'], candidate.storage_path)
+    except FileNotFoundError:
+        print(f"Ошибка: Файл не найден на диске по пути {os.path.join(app.config['UPLOAD_FOLDER'], candidate.storage_path)} для кандидата {candidate_id}.")
+        abort(404) # Файл есть в БД, но отсутствует на диске
+
+# --- КОНЕЦ НОВОГО КОДА: Маршрут Скачивания Резюме (Шаг 29.3) ---
 
 
 # Маршрут для РЕГИСТРАЦИИ (Шаг 19)
@@ -475,7 +541,7 @@ def login():
         if user and user.check_password(password):
             login_user(user)
             flash('Вы успешно вошли в систему!', 'success')
-            return redirect(url_for('list_jobs')) # Перенаправляем на список вакансий после входа
+            return redirect(url_for('list_jobs'))
 
         else:
             flash('Неверный email или пароль.', 'error')
@@ -528,4 +594,6 @@ def greet():
 # Этот блок запускает веб-сервер Flask для локальной разработки
 if __name__ == '__main__':
     # База данных уже создана на шаге 18.2 (или пересоздана на шаге 21.2, 25.2)
+    # Убедимся, что папка загрузки создана при запуске локально
+    # os.makedirs(UPLOAD_FOLDER, exist_ok=True) # Эту строку можно убрать, т.к. она есть выше
     app.run(debug=True, host='0.0.0.0', port=5000)
