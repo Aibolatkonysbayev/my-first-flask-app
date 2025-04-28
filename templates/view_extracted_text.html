@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Текст Резюме: {{ candidate.original_filename }}</title> {# Заголовок страницы #}
+    <style>
+        body { font-family: sans-serif; margin: 20px; }
+        h1 { margin-bottom: 10px; }
+        h2 { margin-top: 20px; margin-bottom: 5px; }
+        pre { /* Стили для сохранения форматирования текста */
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            background-color: #f4f4f4;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            overflow-x: auto; /* Прокрутка по горизонтали, если текст очень длинный */
+        }
+        .filename { font-style: italic; color: #555; margin-bottom: 20px; }
+    </style>
+</head>
+<body>
+    <h1>Извлеченный Текст Резюме</h1>
+    {# Отображаем имя файла #}
+    <p class="filename">Файл: {{ candidate.original_filename }}</p>
+
+    <h2>Текст:</h2>
+    {# Отображаем извлеченный текст в теге pre для сохранения форматирования #}
+    {% if candidate.extracted_text %}
+        <pre>{{ candidate.extracted_text }}</pre>
+    {% else %}
+        <p>Не удалось извлечь текст для этого резюме.</p>
+    {% endif %}
+
+    <p style="margin-top: 20px;">
+        {# Ссылка обратно на детали вакансии #}
+        {# Используем candidate.vacancy_id, чтобы вернуться к нужной вакансии #}
+        <a href="{{ url_for('view_job', job_id=candidate.vacancy_id) }}">К деталям вакансии</a>
+         |
+        {# Ссылка обратно на список вакансий #}
+        <a href="{{ url_for('list_jobs') }}">К списку вакансий</a>
+         |
+        {# Ссылка на главную #}
+        <a href="{{ url_for('index') }}">На главную</a>
+    </p>
+
+</body>
+</html>
