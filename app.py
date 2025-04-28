@@ -19,10 +19,12 @@ from docx import Document # python-docx для DOCX
 import io
 # --- КОНЕЦ КОДА: Импорты для файлов и извлечения текста (Шаг 26) ---
 
-# --- НАЧАЛО НОВОГО КОДА: Импорт для AI (Шаг 27) ---
+# --- НАЧАЛО НОВОГО КОДА: Импорт для AI (Шаг 27 - ИСПРАВЛЕНО для openai v1.0.0+) ---
+# Импортируем новый клиент OpenAI и конкретные классы ошибок
 import openai
+from openai import OpenAI, APIStatusError, APIConnectionError, RateLimitError # Импорты ошибок для v1.0.0+
 import json # Может пригодиться для работы с JSON ответами от API
-# --- КОНЕЦ НОВОГО КОДА: Импорт для AI (Шаг 27) ---
+# --- КОНЕЦ НОВОГО КОДА: Импорт для AI (Шаг 27 - ИСПРАВЛЕНО) ---
 
 
 # Создаем экземпляр приложения Flask
@@ -50,6 +52,18 @@ login_manager.login_message = 'Пожалуйста, войдите, чтобы 
 def load_user(user_id):
     return User.query.get(int(user_id))
 # --- КОНЕЦ КОДА: Flask-Login (Шаг 20) ---
+
+# --- КОД: Фильтр Jinja для JSON (Шаг 28.1) ---
+# Регистрируем фильтр from_json для шаблонов Jinja2
+@app.template_filter('from_json')
+def from_json_filter(json_string):
+    if isinstance(json_string, str):
+        try:
+            return json.loads(json_string)
+        except (json.JSONDecodeError, TypeError):
+            return None
+    return json_string
+# --- КОНЕЦ КОДА: Фильтр Jinja для JSON (Шаг 28.1) ---
 
 
 # --- КОД ДЛЯ МОДЕЛИ ПОЛЬЗОВАТЕЛЯ (Шаг 18, ИЗМЕНЕНО в Шаге 20, 21) ---
@@ -83,9 +97,9 @@ class Vacancy(db.Model):
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
 
-    # --- Связь с кандидатами (Шаг 25) ---
-    candidates = db.relationship('Candidate', backref='vacancy', lazy=True, cascade='all, delete-orphan')
-    # --- Конец Связи с кандидатами (Шаг 25) ---
+    # --- Связь с кандидатами (Шаг 25, ИЗМЕНЕНО в Шаге 25) ---
+    candidates = db.relationship('Candidate', backref='vacancy', lazy=True, cascade='all, delete-orphan', order_by="Candidate.created_at.desc()")
+    # --- Конец Связи с кандидатами (Шаг 25, ИЗМЕНЕНО) ---
 
 
     def __repr__(self):
@@ -98,12 +112,12 @@ class Candidate(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     vacancy_id = db.Column(db.Integer, db.ForeignKey('vacancy.id'), nullable=False)
     original_filename = db.Column(db.String(255), nullable=False)
-    storage_path = db.Column(db.String(255), nullable=True) # Путь, где хранится сам файл (опционально)
-    extracted_text = db.Column(db.Text, nullable=True) # Извлеченный текст резюме
+    storage_path = db.Column(db.String(255), nullable=True)
+    extracted_text = db.Column(db.Text, nullable=True)
 
-    ai_score = db.Column(db.Float, nullable=True) # Числовая оценка релевантности (может быть None до скрининга)
-    keywords = db.Column(db.Text, nullable=True) # Ключевые слова (может быть None до скрининга)
-    status = db.Column(db.String(50), nullable=False, default='uploaded') # Статус обработки (uploaded, processing, scored, failed, failed_ai)
+    ai_score = db.Column(db.Float, nullable=True)
+    keywords = db.Column(db.Text, nullable=True)
+    status = db.Column(db.String(50), nullable=False, default='uploaded')
 
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
@@ -143,66 +157,76 @@ def get_file_extension(filename):
 # --- КОНЕЦ КОДА: Функции извлечения текста (Шаг 26) ---
 
 
-# --- НАЧАЛО НОВОГО КОДА: Функция AI Скрининга (Шаг 27) ---
+# --- НАЧАЛО НОВОГО КОДА: Функция AI Скрининга (Шаг 27 - ИСПРАВЛЕНО для openai v1.0.0+) ---
+# Создаем клиент OpenAI здесь (один раз), а не внутри функции
+# Ключ API берется из переменной окружения AI_API_KEY автоматически при инициализации клиента
+try:
+    ai_client = OpenAI(api_key=os.environ.get('AI_API_KEY'))
+    print("OpenAI клиент инициализирован. Ключ API найден." if os.environ.get('AI_API_KEY') else "OpenAI клиент инициализирован. Ключ API НЕ найден.")
+except Exception as e:
+     ai_client = None # Клиент не будет создан, если ключ невалиден или ошибка
+     print(f"Ошибка инициализации OpenAI клиента: {e}")
+     print("AI Screening будет недоступен.")
+
+
 def perform_ai_screening(candidate_id):
     """Выполняет AI-скрининг для заданного кандидата."""
-    # !!! ВАЖНО: Вызов этой функции должен выполняться в контексте приложения Flask,
-    #    если она обращается к db или моделям.
-    #    Например: with app.app_context(): perform_ai_screening(candidate_id)
+    # Вызов этой функции должен выполняться в контексте приложения Flask,
+    # если она обращается к db или моделям.
 
-    candidate = Candidate.query.get(candidate_id)
-    if not candidate or not candidate.extracted_text:
-        print(f"AI Screening: Кандидат с ID {candidate_id} не найден или текст не извлечен.")
+    # Если клиент AI не был создан (например, нет ключа), сразу отмечаем ошибку
+    if not ai_client:
+        print(f"AI Screening: Клиент OpenAI не инициализирован. Кандидат ID {candidate_id} обработан не будет.")
+        candidate = db.session.get(Candidate, candidate_id)
+        if candidate:
+            candidate.status = 'failed_ai_nokey' # Используем тот же статус ошибки ключа
+            # flash("Ошибка AI: Не настроен или невалиден API ключ.", 'error') # Flash не работает здесь
+            db.session.commit()
         return
 
-    # Получаем описание вакансии, связанной с кандидатом
-    # Благодаря backref='vacancy' в модели Candidate, candidate.vacancy возвращает объект Vacancy
+    # Важно получить кандидата в текущем контексте
+    candidate = db.session.get(Candidate, candidate_id)
+    if not candidate or not candidate.extracted_text:
+        print(f"AI Screening: Кандидат с ID {candidate_id} не найден или текст не извлечен.")
+        return # Нечего обрабатывать
+
+    # Обновляем статус на "в процессе", прежде чем начать долгую операцию
+    candidate.status = 'processing'
+    db.session.commit() # Сохраняем статус "в процессе"
+
     job = candidate.vacancy
     if not job:
         print(f"AI Screening: Вакансия для кандидата {candidate_id} не найдена.")
+        candidate.status = 'failed_ai_novacancy'
+        db.session.commit()
+        # TODO: Логировать
         return
 
     job_description = job.description
     resume_text = candidate.extracted_text
 
-    # --- Получаем AI API ключ из переменной окружения ---
-    ai_api_key = os.environ.get('AI_API_KEY')
-    if not ai_api_key:
-        print("AI Screening Ошибка: Переменная окружения 'AI_API_KEY' не установлена!")
-        candidate.status = 'failed_ai_nokey' # Новый статус для ошибки ключа
-        db.session.commit()
-        flash("Ошибка AI: Не настроен API ключ.", 'error') # Flash не будет работать вне контекста запроса
-        # TODO: Логировать ошибку или обрабатывать иначе, если запускается асинхронно
-        return
-
     # --- Формируем промпт для AI модели ---
-    # Цель промпта: попросить AI выступить в роли рекрутера и оценить релевантность резюме вакансии.
-    # Просим выдать структурированный ответ (например, в JSON формате), включающий оценку и ключевые слова.
-    # Это пример промпта для моделей типа GPT. Для других моделей/API может потребоваться другой формат.
     prompt_messages = [
-        {"role": "system", "content": "Ты опытный рекрутер, специализирующийся на подборе персонала. Твоя задача - сравнить предоставленное резюме кандидата с описанием вакансии и оценить релевантность в процентах (от 0 до 100%). Также выдели ключевые навыки и опыт кандидата, которые соответствуют требованиям вакансии."},
-        {"role": "user", "content": f"Описание Вакансии:\n---\n{job_description}\n---\n\nРезюме Кандидата:\n---\n{resume_text}\n---\n\nПожалуйста, оцени релевантность резюме вакансии в процентах (целое число) и выдели ключевые соответствующие пункты. Предоставь ответ в формате JSON с полями `relevance_score` (число) и `matching_keywords` (список строк). Пример: ```json\n{{\"relevance_score\": 75, \"matching_keywords\": [\"Python\", \"SQL\", \"Machine Learning\"]}}\n```\nЕсли оценить невозможно или резюме явно нерелевантно, выставь 0."},
+        {"role": "system", "content": "Ты опытный рекрутер, специализирующийся на подборе персонала. Твоя задача - сравнить предоставленное резюме кандидата с описанием вакансии и оценить релевантность в процентах (от 0 до 100%). Также выдели ключевые навыки и опыт кандидата, которые соответствуют требованиям вакансии. Предоставь ответ строго в формате JSON с полями `relevance_score` (целое число) и `matching_keywords` (список строк)."},
+        {"role": "user", "content": f"Описание Вакансии:\n---\n{job_description}\n---\n\nРезюме Кандидата:\n---\n{resume_text}\n---\n"},
     ]
 
-    # --- Вызов AI API (OpenAI) ---
+    # --- Вызов AI API (OpenAI) - ИСПРАВЛЕНО для openai v1.0.0+ ---
     try:
-        openai.api_key = ai_api_key # Устанавливаем ключ для библиотеки openai
-        response = openai.ChatCompletion.create( # Используем ChatCompletion для современных моделей
-            model="gpt-3.5-turbo", # Можно использовать более мощные модели типа "gpt-4", но это дороже.
+        # Теперь вызываем через объект клиента и используем .create() для чатов
+        response = ai_client.chat.completions.create(
+            model="gpt-3.5-turbo", # или "gpt-4", "gpt-4-turbo-preview"
             messages=prompt_messages,
-            temperature=0.0, # Делаем ответ детерминированным
-            max_tokens=300, # Ограничиваем длину ответа
-            response_format={"type": "json_object"}, # Просим JSON формат ответа (для новых моделей)
+            temperature=0.0,
+            max_tokens=500,
+            # response_format={"type": "json_object"}, # Эта опция требует новых моделей
         )
 
-        # Парсим ответ от AI
-        # Ответ API может быть в виде JSON строки в текстовом поле, или уже объектом в зависимости от модели/версии API.
-        # Пробуем получить JSON объект из text, если response_format не поддерживается или старая модель
-        # Или напрямую из .response_format, если модель это поддерживает
-        ai_output_text = response.choices[0].message['content'] # Получаем текстовое содержимое ответа
-        print(f"AI Response Text: {ai_output_text}") # Логируем ответ для отладки
+        ai_output_text = response.choices[0].message.content # Доступ к содержимому изменился
 
-        # Попытка парсить JSON из строки. AI не всегда идеально следует формату.
+        print(f"AI Response Text for Candidate {candidate.id}: {ai_output_text}")
+
+        # Попытка парсить JSON из строки.
         ai_result = json.loads(ai_output_text)
 
         score = ai_result.get('relevance_score')
@@ -210,64 +234,66 @@ def perform_ai_screening(candidate_id):
 
         # Валидируем полученные данные
         if isinstance(score, (int, float)) and 0 <= score <= 100:
-            candidate.ai_score = float(score) # Сохраняем как float
-            candidate.keywords = json.dumps(keywords) if isinstance(keywords, list) else None # Сохраняем список как JSON строку
+            candidate.ai_score = float(score)
+            candidate.keywords = json.dumps(keywords) if isinstance(keywords, list) else None
             candidate.status = 'scored' # Статус: успешно оценено
-            flash(f"Резюме {candidate.original_filename} успешно оценено AI. Оценка: {candidate.ai_score}%.", 'success')
+            print(f"AI Screening Успех для Кандидата {candidate.id}. Оценка: {candidate.ai_score}%. Статус: scored.")
         else:
-            # Если AI вернул некорректный формат оценки
-            print(f"AI Screening Ошибка: AI вернул некорректный формат оценки: {ai_output_text}")
+            print(f"AI Screening Ошибка: AI вернул некорректный формат оценки для Кандидата {candidate.id}. Ответ: {ai_output_text}")
             candidate.status = 'failed_ai_format' # Статус: ошибка формата ответа AI
             candidate.ai_score = None
             candidate.keywords = ai_output_text # Сохраним raw ответ для анализа
-            flash(f"Ошибка AI: Не удалось получить корректную оценку для {candidate.original_filename}.", 'error')
-            # TODO: Логировать полный ответ AI для анализа
+            # TODO: Логировать
 
-    except openai.error.AuthenticationError as e:
-        print(f"AI Screening Ошибка аутентификации: {e}")
-        candidate.status = 'failed_ai_auth'
+    # --- Обработка Ошибок API - ИСПРАВЛЕНО для openai v1.0.0+ ---
+    except APIStatusError as e:
+        # Обработка ошибок, связанных со статусом HTTP (4xx, 5xx)
+        print(f"AI Screening Ошибка HTTP API для Кандидата {candidate.id}: {e.status_code} - {e.response.text}")
+        candidate.status = f'failed_ai_http_{e.status_code}' # Более специфичный статус
         candidate.ai_score = None
         candidate.keywords = str(e) # Сохраним текст ошибки
-        flash(f"Ошибка AI: Проблема с ключом API.", 'error')
-        # TODO: Уведомить администратора
+        # Особо обрабатываем 401 (неавторизован) и 429 (лимит запросов)
+        if e.status_code == 401:
+             candidate.status = 'failed_ai_auth'
+        elif e.status_code == 429:
+             candidate.status = 'failed_ai_ratelimit'
 
-    except openai.error.RateLimitError as e:
-        print(f"AI Screening Ошибка Rate Limit: {e}")
+    except APIConnectionError as e:
+        # Обработка ошибок подключения к API
+        print(f"AI Screening Ошибка подключения API для Кандидата {candidate.id}: {e}")
+        candidate.status = 'failed_ai_connection'
+        candidate.ai_score = None
+        candidate.keywords = str(e)
+
+    except RateLimitError as e:
+        # Обработка ошибки превышения лимита запросов (на всякий случай, может быть частью APIStatusError)
+        print(f"AI Screening Ошибка Rate Limit для Кандидата {candidate.id}: {e}")
         candidate.status = 'failed_ai_ratelimit'
         candidate.ai_score = None
         candidate.keywords = str(e)
-        flash(f"Ошибка AI: Превышен лимит запросов. Попробуйте позже.", 'error')
-        # TODO: Реализовать повторные попытки
-
-    except openai.error.OpenAIError as e:
-         print(f"AI Screening Ошибка OpenAI API: {e}")
-         candidate.status = 'failed_ai_api'
-         candidate.ai_score = None
-         candidate.keywords = str(e)
-         flash(f"Ошибка AI API: Произошла ошибка при запросе к AI.", 'error')
-         # TODO: Реализовать более детальную обработку ошибок
 
     except json.JSONDecodeError as e:
-        print(f"AI Screening Ошибка парсинга JSON: {e}. Ответ AI: {ai_output_text}")
-        candidate.status = 'failed_ai_format' # Статус: ошибка формата ответа AI
+        print(f"AI Screening Ошибка парсинга JSON для Кандидата {candidate.id}: {e}. Ответ AI: {ai_output_text}")
+        candidate.status = 'failed_ai_format'
         candidate.ai_score = None
-        candidate.keywords = ai_output_text # Сохраним raw ответ для анализа
-        flash(f"Ошибка AI: Не удалось распарсить ответ от AI для {candidate.original_filename}.", 'error')
-        # TODO: Логировать ошибку парсинга и raw ответ AI
+        candidate.keywords = ai_output_text
+        # TODO: Логировать
 
     except Exception as e:
-        print(f"AI Screening Неизвестная ошибка: {e}")
+        print(f"AI Screening Неизвестная ошибка для Кандидата {candidate.id}: {e}")
+        import traceback
+        traceback.print_exc()
         candidate.status = 'failed_ai_unknown'
         candidate.ai_score = None
         candidate.keywords = str(e)
-        flash(f"Ошибка AI: Произошла неизвестная ошибка при обработке {candidate.original_filename}.", 'error')
-        # TODO: Логировать полную трассировку ошибки
+        # TODO: Логировать
 
     finally:
         # Важно сохранить изменения статуса и результатов, даже если произошла ошибка
         db.session.commit()
 
-# --- КОНЕЦ НОВОГО КОДА: Функция AI Скрининга (Шаг 27) ---
+
+# --- КОНЕЦ НОВОГО КОДА: Функция AI Скрининга (Шаг 27 - ИСПРАВЛЕНО) ---
 
 
 # Маршрут для отображения главной страницы
@@ -314,32 +340,30 @@ def create_job():
     return render_template('create_job.html', user=current_user)
 
 
-# Маршрут для просмотра деталей конкретной вакансии (Шаг 24)
+# Маршрут для просмотра деталей конкретной вакансии (Шаг 24, ИЗМЕНЕНО в Шаге 28.1)
 @app.route('/jobs/<int:job_id>')
 @login_required
 def view_job(job_id):
     job = Vacancy.query.get_or_404(job_id)
 
-    # ВАЖНАЯ ПРОВЕРКА: Убеждаемся, что текущий пользователь является автором этой вакансии
     if job.user_id != current_user.id:
-        abort(403) # 403 Forbidden
+        abort(403)
 
-    # TODO: СЮДА ПОЗЖЕ ПОЛУЧАТЬ И ПЕРЕДАВАТЬ В ШАБЛОН СПИСОК КАНДИДАТОВ для этой вакансии
-    # Например: candidates = job.candidates # Благодаря relation в Vacancy
-    # return render_template('view_job.html', job=job, user=current_user, candidates=candidates)
+    # Получаем список кандидатов (Шаг 28.1)
+    candidates = job.candidates # Благодаря relationship в модели Vacancy, они уже отсортированы
 
-    # Временно передаем только job и user
-    return render_template('view_job.html', job=job, user=current_user)
+    # Передаем объект вакансии, пользователя И список кандидатов в шаблон
+    return render_template('view_job.html', job=job, user=current_user, candidates=candidates)
 
 
-# Маршрут для загрузки резюме для конкретной вакансии (Шаг 26)
+# Маршрут для загрузки резюме для конкретной вакансии (Шаг 26, ИЗМЕНЕНО в Шаге 27)
 @app.route('/jobs/<int:job_id>/upload_resume', methods=['POST'])
 @login_required
 def upload_resume(job_id):
     job = Vacancy.query.get_or_404(job_id)
 
     if job.user_id != current_user.id:
-        abort(403) # 403 Forbidden - Нельзя загружать резюме для чужой вакансии
+        abort(403)
 
     if 'resume_file' not in request.files:
         flash('Файл не был выбран.', 'error')
@@ -366,46 +390,35 @@ def upload_resume(job_id):
     elif file_extension == '.docx':
         extracted_text = extract_text_from_docx(file_content)
 
-    # --- Сохранение кандидата в базу данных (Шаг 26) ---
-    # Проверяем, успешно ли извлечен текст перед сохранением
     if not extracted_text or len(extracted_text.strip()) == 0:
         flash(f'Не удалось извлечь текст или текст пуст из файла {original_filename}.', 'error')
-        # !!! TODO: Логировать ошибку извлечения текста !!!
-        # В реальном приложении можно сохранить файл и попробовать позже или уведомить пользователя
-        # Можно сохранить кандидата со статусом 'extraction_failed' даже без текста
-        # new_candidate = Candidate(vacancy_id=job.id, original_filename=original_filename, status='extraction_failed')
-        # db.session.add(new_candidate)
-        # db.session.commit()
+        # TODO: Можно сохранить кандидата со статусом extraction_failed
         return redirect(url_for('view_job', job_id=job.id))
 
     # !!! TODO: Проверить на дубликаты по имени файла и вакансии, или добавить UUID !!!
 
     new_candidate = Candidate(
-        vacancy_id=job.id, # Связываем кандидата с текущей вакансией
+        vacancy_id=job.id,
         original_filename=original_filename,
         extracted_text=extracted_text,
-        status='uploaded' # Начальный статус
+        status='uploaded'
     )
 
     db.session.add(new_candidate)
     db.session.commit() # Сохраняем кандидата, чтобы у него появился ID в БД
 
-    # --- НАЧАЛО НОВОГО КОДА: Запуск AI Скрининга после сохранения (Шаг 27) ---
-    # Теперь, когда кандидат сохранен и имеет ID, можно запустить скрининг
-    print(f"Кандидат {new_candidate.id} создан. Запускаем AI скрининг...") # Логируем
-    # Важно выполнять операции с БД (query, commit) в контексте запроса или приложения
-    # Поскольку perform_ai_screening обращается к БД, она должна выполняться в контексте приложения
-    # В простом случае синхронно:
-    perform_ai_screening(new_candidate.id)
-    # TODO: Для более длительных операций AI, возможно, нужно запускать асинхронно (например, с помощью Celery)
-    # TODO: Обновить flash сообщение в зависимости от результата AI скрининга
-    # --- КОНЕЦ НОВОГО КОДА: Запуск AI Скрининга после сохранения (Шаг 27) ---
+    # --- Запуск AI Скрининга после сохранения (Шаг 27) ---
+    print(f"Кандидат {new_candidate.id} создан. Запускаем AI скрининг...")
+    # Важно выполнить в контексте приложения, т.к. perform_ai_screening обращается к БД.
+    # current_app уже доступен в контексте запроса.
+    # Если это синхронный вызов, контекст запроса уже есть.
+    # Если это асинхронный вызов (TODO), потребуется app.app_context()
+    perform_ai_screening(new_candidate.id) # Вызываем функцию скрининга
+    # --- Конец Запуск AI Скрининга (Шаг 27) ---
 
 
     # Flash сообщение после завершения всего процесса (включая синхронный AI скрининг)
-    # Если AI синхронный, сообщение может быть уже от функции perform_ai_screening
-    # Если AI асинхронный, здесь будет сообщение о начале обработки
-    flash(f'Резюме "{original_filename}" загружено и обработка начата.', 'success') # Изменяем сообщение
+    flash(f'Резюме "{original_filename}" загружено и обработка завершена (см. статус кандидата ниже).', 'success') # Изменяем сообщение
     return redirect(url_for('view_job', job_id=job.id))
 
 

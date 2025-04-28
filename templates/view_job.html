@@ -40,6 +40,18 @@
             color: #084298;
             border-color: #b6d4fe;
         }
+        /* Стили для списка кандидатов */
+        .candidate-list { list-style: none; padding: 0; }
+        .candidate-item { border: 1px solid #ddd; padding: 10px; margin-bottom: 10px; border-radius: 4px; }
+        .candidate-item p { margin: 5px 0; }
+        .candidate-item strong { margin-right: 5px; }
+
+        /* Стили для статусов кандидатов */
+        .status-uploaded { color: #555; }
+        .status-processing { color: blue; }
+        .status-scored { color: green; }
+        .status-failed, .status-failed_ai_nokey, .status-failed_ai_auth, .status-failed_ai_ratelimit, .status-failed_ai_api, .status-failed_ai_format, .status-failed_ai_unknown, .status-extraction_failed { color: red; }
+
     </style>
 </head>
 <body>
@@ -70,7 +82,7 @@
         {{ job.description }}
     </div>
 
-    {# --- НАЧАЛО НОВОГО КОДА: Форма Загрузки Резюме (Шаг 26.1) --- #}
+    {# --- НАЧАЛО КОДА: Форма Загрузки Резюме (Шаг 26.1) --- #}
     <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #ccc;">
         <h2>Загрузить Резюме Кандидата (.pdf, .docx)</h2>
         {# Форма для отправки файла методом POST #}
@@ -87,13 +99,66 @@
             <button type="submit">Загрузить и Обработать</button>
         </form>
     </div>
-    {# --- КОНЕЦ НОВОГО КОДА: Форма Загрузки Резюме (Шаг 26.1) --- #}
+    {# --- КОНЕЦ КОДА: Форма Загрузки Резюме (Шаг 26.1) --- #}
 
-    {# TODO: СЮДА ПОЗЖЕ СПИСОК КАНДИДАТОВ для этой вакансии #}
+
     <div style="margin-top: 30px;">
         <h2>Кандидаты для этой Вакансии</h2>
-        {# TODO: Отобразить список кандидатов из БД #}
-        <p class="no-jobs">Список кандидатов появится здесь после загрузки резюме.</p>
+        {# --- НАЧАЛО КОДА: Отображение Списка Кандидатов (Шаг 28.2) --- #}
+        {# Проверяем, есть ли кандидаты (список передан из бэкенда в переменной 'candidates') #}
+        {% if candidates %}
+            {# Если список кандидатов не пустой, проходим по нему циклом #}
+            <ul class="candidate-list">
+            {% for candidate in candidates %}
+                <li class="candidate-item">
+                    {# Отображаем имя файла и статус #}
+                    <p><strong>Файл:</strong> {{ candidate.original_filename }}</p>
+                    {# Используем класс для стилизации статуса #}
+                    <p><strong>Статус:</strong> <span class="status-{{ candidate.status }}">{{ candidate.status }}</span></p>
+
+                    {# Если кандидат успешно оценен AI, показываем результат #}
+                    {% if candidate.status == 'scored' %}
+                        {# ai_score - это float, отображаем с 2 знаками после запятой #}
+                        <p style="color: green;"><strong>Оценка AI:</strong> {{ "%.2f" | format(candidate.ai_score) }}%</p>
+                        {% if candidate.keywords %}
+                            {# Keywords хранятся как JSON строка, нужно распарсить для отображения #}
+                            {# Используем зарегистрированный Jinja фильтр from_json #}
+                            {% set keywords_list = candidate.keywords | from_json %}
+                            <p><strong>Ключевые слова:</strong>
+                                {% if keywords_list and (keywords_list is iterable) and (keywords_list is not string) %} {# Проверка, что это список и не пустой #}
+                                    {{ keywords_list | join(', ') }} {# Отображаем список через запятую #}
+                                {% else %}
+                                    Не выделены AI или ошибка формата.
+                                {% endif %}
+                            </p>
+                        {% endif %}
+                    {# Если скрининг не завершен или провалился #}
+                    {% elif 'failed' in candidate.status or candidate.status in ['uploaded', 'processing'] %}
+                         {# Для статусов ошибок или незавершенных используем общий стиль #}
+                         <p style="color: red;">
+                            {# Дополнительная информация для ошибок, если есть в keywords #}
+                            {% if candidate.keywords and 'failed' in candidate.status and candidate.keywords is string %} {# Проверяем, что keywords - это строка с ошибкой #}
+                                Детали: {{ candidate.keywords }}
+                            {% elif candidate.status == 'uploaded' %}
+                                Ожидает обработки.
+                            {% elif candidate.status == 'processing' %}
+                                В процессе обработки...
+                            {% else %}
+                                См. логи сервера для деталей ошибки.
+                            {% endif %}
+                         </p>
+                    {% endif %}
+
+                    {# TODO: Ссылка на просмотр/скачивание оригинального файла резюме #}
+                    {# TODO: Ссылка на детальную страницу кандидата (если она будет) #}
+                </li>
+            {% endfor %}
+            </ul>
+        {% else %}
+            {# Если список кандидатов пустой #}
+            <p class="no-jobs">Кандидатов пока нет.</p>
+        {% endif %}
+         {# --- КОНЕЦ КОДА: Отображение Списка Кандидатов (Шаг 28.2) --- #}
     </div>
 
 
