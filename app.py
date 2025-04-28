@@ -1,5 +1,5 @@
 # Импортируем необходимые классы из Flask
-from flask import Flask, request, jsonify, render_template, redirect, url_for, flash, abort, current_app # Добавляем current_app
+from flask import Flask, request, jsonify, render_template, redirect, url_for, flash, abort, current_app
 # Импортируем библиотеку os для работы с переменными окружения
 import os
 # --- КОД ДЛЯ БАЗЫ ДАННЫХ (Шаг 18) ---
@@ -12,27 +12,25 @@ from datetime import datetime
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 # --- КОНЕЦ КОДА: Flask-Login (Шаг 20) ---
 
-# --- НАЧАЛО НОВОГО КОДА: Импорты для файлов и извлечения текста (Шаг 26) ---
-from werkzeug.utils import secure_filename # Для безопасного получения имени файла
+# --- КОД: Импорты для файлов и извлечения текста (Шаг 26) ---
+from werkzeug.utils import secure_filename
 import fitz # PyMuPDF для PDF
-from docx import Document # python-docx для DOCX (внимательно: Docx с большой буквы!)
-import io # Для работы с файлами в памяти
-# --- КОНЕЦ НОВОГО КОДА: Импорты для файлов и извлечения текста (Шаг 26) ---
+from docx import Document # python-docx для DOCX
+import io
+# --- КОНЕЦ КОДА: Импорты для файлов и извлечения текста (Шаг 26) ---
+
+# --- НАЧАЛО НОВОГО КОДА: Импорт для AI (Шаг 27) ---
+import openai
+import json # Может пригодиться для работы с JSON ответами от API
+# --- КОНЕЦ НОВОГО КОДА: Импорт для AI (Шаг 27) ---
 
 
 # Создаем экземпляр приложения Flask
 app = Flask(__name__)
 
 # --- НАСТРОЙКА SECRET_KEY (Шаг 19) ---
-app.config['SECRET_KEY'] = 'xgj6_6mu,_j7kem_5_e5h7_ko69;_c25vl_vbj6_m,,l' # >>> ОБЯЗАТЕЛЬНО ЗАМЕНИ НА СВОЮ <<<
+app.config['SECRET_KEY'] = 'твоя_очень_сложная_и_уникальная_строка_для_секретного_ключа' # >>> ОБЯЗАТЕЛЬНО ЗАМЕНИ НА СВОЮ <<<
 # --- КОНЕЦ НАСТРОЙКИ SECRET_KEY ---
-
-# --- НАСТРОЙКА ПАПКИ ЗАГРУЗКИ (НОВОЕ для Шага 26) ---
-# Определяем папку для временного хранения загруженных файлов, если нужно
-# Для MVP мы можем извлекать текст прямо из памяти без сохранения, но для полноты оставим
-# app.config['UPLOAD_FOLDER'] = 'uploads' # Пример настройки папки
-# os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True) # Создаем папку, если ее нет
-# --- КОНЕЦ НАСТРОЙКИ ПАПКИ ЗАГРУЗКИ ---
 
 
 # --- КОД ДЛЯ БАЗЫ ДАННЫХ (Шаг 18) ---
@@ -100,12 +98,12 @@ class Candidate(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     vacancy_id = db.Column(db.Integer, db.ForeignKey('vacancy.id'), nullable=False)
     original_filename = db.Column(db.String(255), nullable=False)
-    storage_path = db.Column(db.String(255), nullable=True) # Путь, где хранится файл (опционально)
+    storage_path = db.Column(db.String(255), nullable=True) # Путь, где хранится сам файл (опционально)
     extracted_text = db.Column(db.Text, nullable=True) # Извлеченный текст резюме
 
-    ai_score = db.Column(db.Float, nullable=True)
-    keywords = db.Column(db.Text, nullable=True)
-    status = db.Column(db.String(50), nullable=False, default='uploaded') # Статус обработки
+    ai_score = db.Column(db.Float, nullable=True) # Числовая оценка релевантности (может быть None до скрининга)
+    keywords = db.Column(db.Text, nullable=True) # Ключевые слова (может быть None до скрининга)
+    status = db.Column(db.String(50), nullable=False, default='uploaded') # Статус обработки (uploaded, processing, scored, failed, failed_ai)
 
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
@@ -114,39 +112,162 @@ class Candidate(db.Model):
 # --- КОНЕЦ КОДА ДЛЯ МОДЕЛИ КАНДИДАТА (Шаг 25) ---
 
 
-# --- НАЧАЛО НОВОГО КОДА: Функции извлечения текста (Шаг 26) ---
+# --- КОД: Функции извлечения текста (Шаг 26) ---
 def extract_text_from_pdf(pdf_content):
     """Извлекает текст из PDF-файла."""
     text = ""
     try:
-        # fitz.open требует либо путь к файлу, либо объект BytesIO
-        # Используем BytesIO для чтения из памяти
         with fitz.open(stream=pdf_content, filetype="pdf") as doc:
             for page in doc:
                 text += page.get_text()
     except Exception as e:
         print(f"Ошибка при извлечении текста из PDF: {e}")
-        text = None # Возвращаем None или пустую строку в случае ошибки
+        text = None
     return text
 
 def extract_text_from_docx(docx_content):
     """Извлекает текст из DOCX-файла."""
     text = ""
     try:
-        # Document требует либо путь к файлу, либо объект файлового потока
-        # Используем BytesIO для чтения из памяти
         doc = Document(io.BytesIO(docx_content))
         for paragraph in doc.paragraphs:
-            text += paragraph.text + "\n" # Добавляем перенос строки после каждого параграфа
+            text += paragraph.text + "\n"
     except Exception as e:
         print(f"Ошибка при извлечении текста из DOCX: {e}")
-        text = None # Возвращаем None или пустую строку в случае ошибки
+        text = None
     return text
 
 def get_file_extension(filename):
     """Возвращает расширение файла в нижнем регистре."""
     return os.path.splitext(filename)[1].lower()
-# --- КОНЕЦ НОВОГО КОДА: Функции извлечения текста (Шаг 26) ---
+# --- КОНЕЦ КОДА: Функции извлечения текста (Шаг 26) ---
+
+
+# --- НАЧАЛО НОВОГО КОДА: Функция AI Скрининга (Шаг 27) ---
+def perform_ai_screening(candidate_id):
+    """Выполняет AI-скрининг для заданного кандидата."""
+    # !!! ВАЖНО: Вызов этой функции должен выполняться в контексте приложения Flask,
+    #    если она обращается к db или моделям.
+    #    Например: with app.app_context(): perform_ai_screening(candidate_id)
+
+    candidate = Candidate.query.get(candidate_id)
+    if not candidate or not candidate.extracted_text:
+        print(f"AI Screening: Кандидат с ID {candidate_id} не найден или текст не извлечен.")
+        return
+
+    # Получаем описание вакансии, связанной с кандидатом
+    # Благодаря backref='vacancy' в модели Candidate, candidate.vacancy возвращает объект Vacancy
+    job = candidate.vacancy
+    if not job:
+        print(f"AI Screening: Вакансия для кандидата {candidate_id} не найдена.")
+        return
+
+    job_description = job.description
+    resume_text = candidate.extracted_text
+
+    # --- Получаем AI API ключ из переменной окружения ---
+    ai_api_key = os.environ.get('AI_API_KEY')
+    if not ai_api_key:
+        print("AI Screening Ошибка: Переменная окружения 'AI_API_KEY' не установлена!")
+        candidate.status = 'failed_ai_nokey' # Новый статус для ошибки ключа
+        db.session.commit()
+        flash("Ошибка AI: Не настроен API ключ.", 'error') # Flash не будет работать вне контекста запроса
+        # TODO: Логировать ошибку или обрабатывать иначе, если запускается асинхронно
+        return
+
+    # --- Формируем промпт для AI модели ---
+    # Цель промпта: попросить AI выступить в роли рекрутера и оценить релевантность резюме вакансии.
+    # Просим выдать структурированный ответ (например, в JSON формате), включающий оценку и ключевые слова.
+    # Это пример промпта для моделей типа GPT. Для других моделей/API может потребоваться другой формат.
+    prompt_messages = [
+        {"role": "system", "content": "Ты опытный рекрутер, специализирующийся на подборе персонала. Твоя задача - сравнить предоставленное резюме кандидата с описанием вакансии и оценить релевантность в процентах (от 0 до 100%). Также выдели ключевые навыки и опыт кандидата, которые соответствуют требованиям вакансии."},
+        {"role": "user", "content": f"Описание Вакансии:\n---\n{job_description}\n---\n\nРезюме Кандидата:\n---\n{resume_text}\n---\n\nПожалуйста, оцени релевантность резюме вакансии в процентах (целое число) и выдели ключевые соответствующие пункты. Предоставь ответ в формате JSON с полями `relevance_score` (число) и `matching_keywords` (список строк). Пример: ```json\n{{\"relevance_score\": 75, \"matching_keywords\": [\"Python\", \"SQL\", \"Machine Learning\"]}}\n```\nЕсли оценить невозможно или резюме явно нерелевантно, выставь 0."},
+    ]
+
+    # --- Вызов AI API (OpenAI) ---
+    try:
+        openai.api_key = ai_api_key # Устанавливаем ключ для библиотеки openai
+        response = openai.ChatCompletion.create( # Используем ChatCompletion для современных моделей
+            model="gpt-3.5-turbo", # Можно использовать более мощные модели типа "gpt-4", но это дороже.
+            messages=prompt_messages,
+            temperature=0.0, # Делаем ответ детерминированным
+            max_tokens=300, # Ограничиваем длину ответа
+            response_format={"type": "json_object"}, # Просим JSON формат ответа (для новых моделей)
+        )
+
+        # Парсим ответ от AI
+        # Ответ API может быть в виде JSON строки в текстовом поле, или уже объектом в зависимости от модели/версии API.
+        # Пробуем получить JSON объект из text, если response_format не поддерживается или старая модель
+        # Или напрямую из .response_format, если модель это поддерживает
+        ai_output_text = response.choices[0].message['content'] # Получаем текстовое содержимое ответа
+        print(f"AI Response Text: {ai_output_text}") # Логируем ответ для отладки
+
+        # Попытка парсить JSON из строки. AI не всегда идеально следует формату.
+        ai_result = json.loads(ai_output_text)
+
+        score = ai_result.get('relevance_score')
+        keywords = ai_result.get('matching_keywords')
+
+        # Валидируем полученные данные
+        if isinstance(score, (int, float)) and 0 <= score <= 100:
+            candidate.ai_score = float(score) # Сохраняем как float
+            candidate.keywords = json.dumps(keywords) if isinstance(keywords, list) else None # Сохраняем список как JSON строку
+            candidate.status = 'scored' # Статус: успешно оценено
+            flash(f"Резюме {candidate.original_filename} успешно оценено AI. Оценка: {candidate.ai_score}%.", 'success')
+        else:
+            # Если AI вернул некорректный формат оценки
+            print(f"AI Screening Ошибка: AI вернул некорректный формат оценки: {ai_output_text}")
+            candidate.status = 'failed_ai_format' # Статус: ошибка формата ответа AI
+            candidate.ai_score = None
+            candidate.keywords = ai_output_text # Сохраним raw ответ для анализа
+            flash(f"Ошибка AI: Не удалось получить корректную оценку для {candidate.original_filename}.", 'error')
+            # TODO: Логировать полный ответ AI для анализа
+
+    except openai.error.AuthenticationError as e:
+        print(f"AI Screening Ошибка аутентификации: {e}")
+        candidate.status = 'failed_ai_auth'
+        candidate.ai_score = None
+        candidate.keywords = str(e) # Сохраним текст ошибки
+        flash(f"Ошибка AI: Проблема с ключом API.", 'error')
+        # TODO: Уведомить администратора
+
+    except openai.error.RateLimitError as e:
+        print(f"AI Screening Ошибка Rate Limit: {e}")
+        candidate.status = 'failed_ai_ratelimit'
+        candidate.ai_score = None
+        candidate.keywords = str(e)
+        flash(f"Ошибка AI: Превышен лимит запросов. Попробуйте позже.", 'error')
+        # TODO: Реализовать повторные попытки
+
+    except openai.error.OpenAIError as e:
+         print(f"AI Screening Ошибка OpenAI API: {e}")
+         candidate.status = 'failed_ai_api'
+         candidate.ai_score = None
+         candidate.keywords = str(e)
+         flash(f"Ошибка AI API: Произошла ошибка при запросе к AI.", 'error')
+         # TODO: Реализовать более детальную обработку ошибок
+
+    except json.JSONDecodeError as e:
+        print(f"AI Screening Ошибка парсинга JSON: {e}. Ответ AI: {ai_output_text}")
+        candidate.status = 'failed_ai_format' # Статус: ошибка формата ответа AI
+        candidate.ai_score = None
+        candidate.keywords = ai_output_text # Сохраним raw ответ для анализа
+        flash(f"Ошибка AI: Не удалось распарсить ответ от AI для {candidate.original_filename}.", 'error')
+        # TODO: Логировать ошибку парсинга и raw ответ AI
+
+    except Exception as e:
+        print(f"AI Screening Неизвестная ошибка: {e}")
+        candidate.status = 'failed_ai_unknown'
+        candidate.ai_score = None
+        candidate.keywords = str(e)
+        flash(f"Ошибка AI: Произошла неизвестная ошибка при обработке {candidate.original_filename}.", 'error')
+        # TODO: Логировать полную трассировку ошибки
+
+    finally:
+        # Важно сохранить изменения статуса и результатов, даже если произошла ошибка
+        db.session.commit()
+
+# --- КОНЕЦ НОВОГО КОДА: Функция AI Скрининга (Шаг 27) ---
 
 
 # Маршрут для отображения главной страницы
@@ -211,76 +332,81 @@ def view_job(job_id):
     return render_template('view_job.html', job=job, user=current_user)
 
 
-# --- НАЧАЛО НОВОГО КОДА: Маршрут Загрузки Резюме (Шаг 26) ---
-# Маршрут для загрузки резюме для конкретной вакансии
+# Маршрут для загрузки резюме для конкретной вакансии (Шаг 26)
 @app.route('/jobs/<int:job_id>/upload_resume', methods=['POST'])
-@login_required # Только авторизованные пользователи могут загружать
+@login_required
 def upload_resume(job_id):
-    # Находим вакансию по ID (ту же логику, что и в view_job)
     job = Vacancy.query.get_or_404(job_id)
 
-    # ВАЖНАЯ ПРОВЕРКА: Убеждаемся, что текущий пользователь является автором этой вакансии
     if job.user_id != current_user.id:
         abort(403) # 403 Forbidden - Нельзя загружать резюме для чужой вакансии
 
-    # Проверяем, был ли файл вообще отправлен в запросе
     if 'resume_file' not in request.files:
         flash('Файл не был выбран.', 'error')
         return redirect(url_for('view_job', job_id=job.id))
 
     file = request.files['resume_file']
 
-    # Если пользователь не выбрал файл и форма пуста
     if file.filename == '':
         flash('Файл не был выбран.', 'error')
         return redirect(url_for('view_job', job_id=job.id))
 
-    # Проверяем расширение файла
-    original_filename = secure_filename(file.filename) # Безопасно получаем имя файла
+    original_filename = secure_filename(file.filename)
     file_extension = get_file_extension(original_filename)
 
-    # Проверяем, поддерживается ли формат файла
     if file_extension not in ['.pdf', '.docx']:
         flash('Неподдерживаемый формат файла. Разрешены только .pdf и .docx.', 'error')
         return redirect(url_for('view_job', job_id=job.id))
 
-    # --- Извлечение текста из файла ---
     extracted_text = None
-    file_content = file.read() # Читаем содержимое файла в байты
+    file_content = file.read()
 
     if file_extension == '.pdf':
         extracted_text = extract_text_from_pdf(file_content)
     elif file_extension == '.docx':
         extracted_text = extract_text_from_docx(file_content)
 
-    # Проверяем, успешно ли извлечен текст
+    # --- Сохранение кандидата в базу данных (Шаг 26) ---
+    # Проверяем, успешно ли извлечен текст перед сохранением
     if not extracted_text or len(extracted_text.strip()) == 0:
-        flash(f'Не удалось извлечь текст из файла {original_filename}.', 'error')
+        flash(f'Не удалось извлечь текст или текст пуст из файла {original_filename}.', 'error')
         # !!! TODO: Логировать ошибку извлечения текста !!!
         # В реальном приложении можно сохранить файл и попробовать позже или уведомить пользователя
+        # Можно сохранить кандидата со статусом 'extraction_failed' даже без текста
+        # new_candidate = Candidate(vacancy_id=job.id, original_filename=original_filename, status='extraction_failed')
+        # db.session.add(new_candidate)
+        # db.session.commit()
         return redirect(url_for('view_job', job_id=job.id))
 
-    # --- Сохранение кандидата в базу данных ---
     # !!! TODO: Проверить на дубликаты по имени файла и вакансии, или добавить UUID !!!
 
     new_candidate = Candidate(
         vacancy_id=job.id, # Связываем кандидата с текущей вакансией
         original_filename=original_filename,
         extracted_text=extracted_text,
-        # storage_path= # TODO: Если нужно сохранять сам файл, указать путь
         status='uploaded' # Начальный статус
-        # ai_score, keywords пока NULL
     )
 
     db.session.add(new_candidate)
-    db.session.commit()
+    db.session.commit() # Сохраняем кандидата, чтобы у него появился ID в БД
 
-    flash(f'Резюме "{original_filename}" успешно загружено и текст извлечен!', 'success')
+    # --- НАЧАЛО НОВОГО КОДА: Запуск AI Скрининга после сохранения (Шаг 27) ---
+    # Теперь, когда кандидат сохранен и имеет ID, можно запустить скрининг
+    print(f"Кандидат {new_candidate.id} создан. Запускаем AI скрининг...") # Логируем
+    # Важно выполнять операции с БД (query, commit) в контексте запроса или приложения
+    # Поскольку perform_ai_screening обращается к БД, она должна выполняться в контексте приложения
+    # В простом случае синхронно:
+    perform_ai_screening(new_candidate.id)
+    # TODO: Для более длительных операций AI, возможно, нужно запускать асинхронно (например, с помощью Celery)
+    # TODO: Обновить flash сообщение в зависимости от результата AI скрининга
+    # --- КОНЕЦ НОВОГО КОДА: Запуск AI Скрининга после сохранения (Шаг 27) ---
 
-    # !!! TODO: ТУТ ДОЛЖЕН ЗАПУСТИТЬСЯ ПРОЦЕСС AI-СКРИНИНГА ДЛЯ ЭТОГО КАНДИДАТА !!!
 
-    return redirect(url_for('view_job', job_id=job.id)) # Перенаправляем обратно на страницу деталей вакансии
-# --- КОНЕЦ НОВОГО КОДА: Маршрут Загрузки Резюме (Шаг 26) ---
+    # Flash сообщение после завершения всего процесса (включая синхронный AI скрининг)
+    # Если AI синхронный, сообщение может быть уже от функции perform_ai_screening
+    # Если AI асинхронный, здесь будет сообщение о начале обработки
+    flash(f'Резюме "{original_filename}" загружено и обработка начата.', 'success') # Изменяем сообщение
+    return redirect(url_for('view_job', job_id=job.id))
 
 
 # Маршрут для РЕГИСТРАЦИИ (Шаг 19)
