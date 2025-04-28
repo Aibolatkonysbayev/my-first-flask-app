@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ job.title }} - Детали Вакансии</title> {# Заголовок страницы будет названием вакансии #}
+    <style>
+        body { font-family: sans-serif; margin: 20px; }
+        h1 { margin-bottom: 5px; }
+        .job-meta { font-size: 0.9em; color: #555; margin-bottom: 20px; }
+        .job-description {
+            border: 1px solid #eee;
+            padding: 15px;
+            white-space: pre-wrap; /* Сохраняем переносы строк */
+            word-wrap: break-word; /* Переносим длинные слова */
+            background-color: #f9f9f9;
+        }
+         .flash-messages { /* Стили для сообщений */
+            list-style: none;
+            padding: 0;
+            margin-bottom: 15px;
+        }
+        .flash-messages li {
+            padding: 10px;
+            margin-bottom: 5px;
+            border-radius: 4px;
+        }
+        .flash-messages .success {
+            background-color: #d4edda;
+            color: #155724;
+            border-color: #c3e6cb;
+        }
+        .flash-messages .error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border-color: #f5c6cb;
+        }
+         .info { /* Стиль для информационных сообщений */
+            background-color: #cfe2ff;
+            color: #084298;
+            border-color: #b6d4fe;
+        }
+    </style>
+</head>
+<body>
+    {# Сообщения от бэкенда #}
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            <ul class="flash-messages">
+            {% for category, message in messages %}
+                <li class="{{ category }}">{{ message }}</li>
+            {% endfor %}
+            </ul>
+        {% endif %}
+    {% endwith %}
+
+    {# Отображаем название вакансии #}
+    <h1>{{ job.title }}</h1>
+    {# Отображаем мета-информацию: кто создал и когда #}
+    {# job.author доступно благодаря backref='author' в модели User #}
+    <p class="job-meta">
+        Создана: {{ job.created_at.strftime('%Y-%m-%d %H:%M') }}
+        {# TODO: Отображать имя автора, если это нужно в MVP #}
+        {# Автор: {{ job.author.email }} #}
+    </p>
+
+    <h2>Описание вакансии:</h2>
+    {# Отображаем полное описание вакансии #}
+    <div class="job-description">
+        {{ job.description }}
+    </div>
+
+    {# TODO: СЮДА ПОЗЖЕ СПИСОК КАНДИДАТОВ И ФОРМА ЗАГРУЗКИ #}
+
+    <p style="margin-top: 20px;">
+        {# Ссылка обратно на список вакансий #}
+        <a href="{{ url_for('list_jobs') }}">К списку вакансий</a>
+         |
+        {# Ссылка на главную страницу #}
+        <a href="{{ url_for('index') }}">На главную</a>
+    </p>
+
+</body>
+</html>

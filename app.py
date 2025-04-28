@@ -1,5 +1,5 @@
 # Импортируем необходимые классы из Flask
-from flask import Flask, request, jsonify, render_template, redirect, url_for, flash
+from flask import Flask, request, jsonify, render_template, redirect, url_for, flash, abort # Добавляем abort
 # Импортируем библиотеку os для работы с переменными окружения
 import os
 # --- КОД ДЛЯ БАЗЫ ДАННЫХ (Шаг 18) ---
@@ -16,7 +16,7 @@ from flask_login import LoginManager, UserMixin, login_user, logout_user, login_
 app = Flask(__name__)
 
 # --- НАСТРОЙКА SECRET_KEY (Шаг 19) ---
-app.config['SECRET_KEY'] = 'tyi,_htym_uk6_hm,_mkl._v54j_b8_ s5_nm,,' # >>> ОБЯЗАТЕЛЬНО ЗАМЕНИ НА СВОЮ <<<
+app.config['SECRET_KEY'] = 'ggn_grgsn_nt_gen_bnmy5_bsy_,,,_vdgtn_b5k' # >>> ОБЯЗАТЕЛЬНО ЗАМЕНИ НА СВОЮ <<<
 # --- КОНЕЦ НАСТРОЙКИ SECRET_KEY ---
 
 
@@ -46,8 +46,7 @@ class User(db.Model, UserMixin):
     password = db.Column(db.String(60), nullable=False)
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
-    # --- Связь с вакансиями (Шаг 21) ---
-    # Добавим order_by для сортировки вакансий по дате создания по умолчанию
+    # --- Связь с вакансиями (Шаг 21, ИЗМЕНЕНО в Шаге 23) ---
     vacancies = db.relationship('Vacancy', backref='author', lazy=True, order_by="Vacancy.created_at.desc()")
     # --- Конец Связи с вакансиями (Шаг 21, ИЗМЕНЕНО) ---
 
@@ -86,27 +85,22 @@ def index():
      # Если пользователь авторизован, можно показать приветствие и ссылку на его вакансии
      if current_user.is_authenticated:
          flash(f'Привет, {current_user.email}!', 'success') # Пример приветствия
-         # TODO: Добавить ссылку на список вакансий в index.html
+         # TODO: Добавить ссылку на список вакансий в index.html - Сделано в Шаге 23.3
      return render_template('index.html', user=current_user)
 
 
-# --- НАЧАЛО НОВОГО КОДА: Маршрут Списка Вакансий (Шаг 23) ---
+# Маршрут Списка Вакансий (Шаг 23)
 @app.route('/jobs')
 @login_required # Только авторизованные пользователи могут видеть список
 def list_jobs():
-    # Получаем ВСЕ вакансии, где user_id совпадает с id текущего вошедшего пользователя
-    # Благодаря relationship в модели User, можно также сделать так: current_user.vacancies
-    # Query().all() возвращает список всех найденных объектов
-    user_vacancies = Vacancy.query.filter_by(user_id=current_user.id).all()
-    # Можно также использовать отношение, это часто более "питонично":
-    # user_vacancies = current_user.vacancies # Вакансии уже отсортированы по умолчанию в модели
+    # Получаем ВСЕ вакансии текущего пользователя, отсортированные по дате создания (см. модель User relationship)
+    user_vacancies = current_user.vacancies # Благодаря relationship и order_by в модели User
 
     # Передаем список вакансий в шаблон
     return render_template('list_jobs.html', jobs=user_vacancies, user=current_user)
-# --- КОНЕЦ НОВОГО КОДА: Маршрут Списка Вакансий (Шаг 23) ---
 
 
-# Маршрут для Создания Вакансии (Шаг 22, ИЗМЕНЕНО перенаправление)
+# Маршрут для Создания Вакансии (Шаг 22)
 @app.route('/jobs/create', methods=['GET', 'POST'])
 @login_required
 def create_job():
@@ -128,10 +122,33 @@ def create_job():
         db.session.commit()
 
         flash('Вакансия успешно создана!', 'success')
-        # !!! ИЗМЕНЕНИЕ: Перенаправляем на страницу списка вакансий после создания !!!
+        # Перенаправляем на страницу списка вакансий после создания
         return redirect(url_for('list_jobs'))
 
     return render_template('create_job.html', user=current_user)
+
+
+# --- НАЧАЛО НОВОГО КОДА: Маршрут Деталей Вакансии (Шаг 24) ---
+# Маршрут для просмотра деталей конкретной вакансии
+# <int:job_id> - означает, что часть URL будет целым числом (ID вакансии)
+@app.route('/jobs/<int:job_id>')
+@login_required # Только авторизованные пользователи могут видеть детали
+def view_job(job_id):
+    # Находим вакансию по ID. get_or_404() автоматически вернет страницу 404 Not Found,
+    # если вакансия с таким ID не существует.
+    job = Vacancy.query.get_or_404(job_id)
+
+    # !!! ВАЖНАЯ ПРОВЕРКА: Убеждаемся, что текущий пользователь является автором этой вакансии !!!
+    # Это нужно, чтобы пользователь не мог посмотреть вакансии других пользователей,
+    # просто подставив другой ID в адресную строку.
+    if job.user_id != current_user.id:
+        # Если пользователь не является автором, возвращаем ошибку 403 Forbidden (Запрещено)
+        # Необходимо импортировать abort из flask
+        abort(403) # Или можно перенаправить куда-то, или показать сообщение об ошибке
+
+    # Передаем найденный объект вакансии в шаблон для отображения
+    return render_template('view_job.html', job=job, user=current_user)
+# --- КОНЕЦ НОВОГО КОДА: Маршрут Деталей Вакансии (Шаг 24) ---
 
 
 # Маршрут для РЕГИСТРАЦИИ (Шаг 19)
@@ -187,8 +204,8 @@ def login():
         if user and user.check_password(password):
             login_user(user)
             flash('Вы успешно вошли в систему!', 'success')
-            # TODO: Возможно, добавить перенаправление на jobs
-            return redirect(url_for('list_jobs')) # <<< ИЗМЕНЕНИЕ: Перенаправляем на список вакансий после входа
+            # Перенаправляем на страницу списка вакансий после входа
+            return redirect(url_for('list_jobs'))
 
         else:
             flash('Неверный email или пароль.', 'error')
