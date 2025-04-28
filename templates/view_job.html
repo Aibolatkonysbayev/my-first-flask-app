@@ -70,7 +70,32 @@
         {{ job.description }}
     </div>
 
-    {# TODO: СЮДА ПОЗЖЕ СПИСОК КАНДИДАТОВ И ФОРМА ЗАГРУЗКИ #}
+    {# --- НАЧАЛО НОВОГО КОДА: Форма Загрузки Резюме (Шаг 26.1) --- #}
+    <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #ccc;">
+        <h2>Загрузить Резюме Кандидата (.pdf, .docx)</h2>
+        {# Форма для отправки файла методом POST #}
+        {# action="{{ url_for('upload_resume', job_id=job.id) }}" - указывает маршрут на бэкенде #}
+        {# enctype="multipart/form-data" - ОБЯЗАТЕЛЬНО для форм, отправляющих файлы #}
+        <form method="POST" action="{{ url_for('upload_resume', job_id=job.id) }}" enctype="multipart/form-data">
+            <div>
+                <label for="resume_file">Выберите файл резюме:</label>
+                {# input type="file" - поле для выбора файла #}
+                {# name="resume_file" - имя поля, по которому бэкенд получит файл #}
+                {# accept=".pdf,.docx" - подсказка браузеру для фильтрации типов файлов (нестрогая валидация) #}
+                <input type="file" id="resume_file" name="resume_file" accept=".pdf,.docx" required>
+            </div>
+            <button type="submit">Загрузить и Обработать</button>
+        </form>
+    </div>
+    {# --- КОНЕЦ НОВОГО КОДА: Форма Загрузки Резюме (Шаг 26.1) --- #}
+
+    {# TODO: СЮДА ПОЗЖЕ СПИСОК КАНДИДАТОВ для этой вакансии #}
+    <div style="margin-top: 30px;">
+        <h2>Кандидаты для этой Вакансии</h2>
+        {# TODO: Отобразить список кандидатов из БД #}
+        <p class="no-jobs">Список кандидатов появится здесь после загрузки резюме.</p>
+    </div>
+
 
     <p style="margin-top: 20px;">
         {# Ссылка обратно на список вакансий #}

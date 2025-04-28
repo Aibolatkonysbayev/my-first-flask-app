@@ -1,5 +1,5 @@
 # Импортируем необходимые классы из Flask
-from flask import Flask, request, jsonify, render_template, redirect, url_for, flash, abort # Добавляем abort
+from flask import Flask, request, jsonify, render_template, redirect, url_for, flash, abort, current_app # Добавляем current_app
 # Импортируем библиотеку os для работы с переменными окружения
 import os
 # --- КОД ДЛЯ БАЗЫ ДАННЫХ (Шаг 18) ---
@@ -12,12 +12,27 @@ from datetime import datetime
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 # --- КОНЕЦ КОДА: Flask-Login (Шаг 20) ---
 
+# --- НАЧАЛО НОВОГО КОДА: Импорты для файлов и извлечения текста (Шаг 26) ---
+from werkzeug.utils import secure_filename # Для безопасного получения имени файла
+import fitz # PyMuPDF для PDF
+from docx import Document # python-docx для DOCX (внимательно: Docx с большой буквы!)
+import io # Для работы с файлами в памяти
+# --- КОНЕЦ НОВОГО КОДА: Импорты для файлов и извлечения текста (Шаг 26) ---
+
+
 # Создаем экземпляр приложения Flask
 app = Flask(__name__)
 
 # --- НАСТРОЙКА SECRET_KEY (Шаг 19) ---
-app.config['SECRET_KEY'] = 'ggn_grgsn_nt_gen_bnmy5_bsy_,,,_vdgtn_b5k' # >>> ОБЯЗАТЕЛЬНО ЗАМЕНИ НА СВОЮ <<<
+app.config['SECRET_KEY'] = 'xgj6_6mu,_j7kem_5_e5h7_ko69;_c25vl_vbj6_m,,l' # >>> ОБЯЗАТЕЛЬНО ЗАМЕНИ НА СВОЮ <<<
 # --- КОНЕЦ НАСТРОЙКИ SECRET_KEY ---
+
+# --- НАСТРОЙКА ПАПКИ ЗАГРУЗКИ (НОВОЕ для Шага 26) ---
+# Определяем папку для временного хранения загруженных файлов, если нужно
+# Для MVP мы можем извлекать текст прямо из памяти без сохранения, но для полноты оставим
+# app.config['UPLOAD_FOLDER'] = 'uploads' # Пример настройки папки
+# os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True) # Создаем папку, если ее нет
+# --- КОНЕЦ НАСТРОЙКИ ПАПКИ ЗАГРУЗКИ ---
 
 
 # --- КОД ДЛЯ БАЗЫ ДАННЫХ (Шаг 18) ---
@@ -62,41 +77,92 @@ class User(db.Model, UserMixin):
 # --- КОНЕЦ КОДА ДЛЯ МОДЕЛИ ПОЛЬЗОВАТЕЛЯ (Шаг 18, ИЗМЕНЕНО) ---
 
 
-# --- КОД ДЛЯ МОДЕЛИ ВАКАНСИИ (Шаг 21) ---
+# --- КОД ДЛЯ МОДЕЛИ ВАКАНСИИ (Шаг 21, ИЗМЕНЕНО в Шаге 25) ---
 class Vacancy(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     title = db.Column(db.String(100), nullable=False)
     description = db.Column(db.Text, nullable=False)
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
-    # --- Внешний ключ для связи с пользователем ---
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    # --- Конец Внешнего ключа ---
 
-    # !!! TODO: СЮДА ПОЗЖЕ ДОБАВИТЬ СВЯЗЬ С КАНДИДАТАМИ (Шаг 21) !!!
+    # --- Связь с кандидатами (Шаг 25) ---
+    candidates = db.relationship('Candidate', backref='vacancy', lazy=True, cascade='all, delete-orphan')
+    # --- Конец Связи с кандидатами (Шаг 25) ---
+
 
     def __repr__(self):
         return f"Vacancy('{self.title}', '{self.created_at}')"
-# --- КОНЕЦ КОДА ДЛЯ МОДЕЛИ ВАКАНСИИ (Шаг 21) ---
+# --- КОНЕЦ КОДА ДЛЯ МОДЕЛИ ВАКАНСИИ (Шаг 21, ИЗМЕНЕНО) ---
+
+
+# --- КОД ДЛЯ МОДЕЛИ КАНДИДАТА (Шаг 25) ---
+class Candidate(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    vacancy_id = db.Column(db.Integer, db.ForeignKey('vacancy.id'), nullable=False)
+    original_filename = db.Column(db.String(255), nullable=False)
+    storage_path = db.Column(db.String(255), nullable=True) # Путь, где хранится файл (опционально)
+    extracted_text = db.Column(db.Text, nullable=True) # Извлеченный текст резюме
+
+    ai_score = db.Column(db.Float, nullable=True)
+    keywords = db.Column(db.Text, nullable=True)
+    status = db.Column(db.String(50), nullable=False, default='uploaded') # Статус обработки
+
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+    def __repr__(self):
+        return f"Candidate('{self.original_filename}', VacancyID:{self.vacancy_id}, Status:'{self.status}')"
+# --- КОНЕЦ КОДА ДЛЯ МОДЕЛИ КАНДИДАТА (Шаг 25) ---
+
+
+# --- НАЧАЛО НОВОГО КОДА: Функции извлечения текста (Шаг 26) ---
+def extract_text_from_pdf(pdf_content):
+    """Извлекает текст из PDF-файла."""
+    text = ""
+    try:
+        # fitz.open требует либо путь к файлу, либо объект BytesIO
+        # Используем BytesIO для чтения из памяти
+        with fitz.open(stream=pdf_content, filetype="pdf") as doc:
+            for page in doc:
+                text += page.get_text()
+    except Exception as e:
+        print(f"Ошибка при извлечении текста из PDF: {e}")
+        text = None # Возвращаем None или пустую строку в случае ошибки
+    return text
+
+def extract_text_from_docx(docx_content):
+    """Извлекает текст из DOCX-файла."""
+    text = ""
+    try:
+        # Document требует либо путь к файлу, либо объект файлового потока
+        # Используем BytesIO для чтения из памяти
+        doc = Document(io.BytesIO(docx_content))
+        for paragraph in doc.paragraphs:
+            text += paragraph.text + "\n" # Добавляем перенос строки после каждого параграфа
+    except Exception as e:
+        print(f"Ошибка при извлечении текста из DOCX: {e}")
+        text = None # Возвращаем None или пустую строку в случае ошибки
+    return text
+
+def get_file_extension(filename):
+    """Возвращает расширение файла в нижнем регистре."""
+    return os.path.splitext(filename)[1].lower()
+# --- КОНЕЦ НОВОГО КОДА: Функции извлечения текста (Шаг 26) ---
 
 
 # Маршрут для отображения главной страницы
 @app.route('/')
 def index():
-     # Если пользователь авторизован, можно показать приветствие и ссылку на его вакансии
      if current_user.is_authenticated:
-         flash(f'Привет, {current_user.email}!', 'success') # Пример приветствия
-         # TODO: Добавить ссылку на список вакансий в index.html - Сделано в Шаге 23.3
+         flash(f'Привет, {current_user.email}!', 'success')
      return render_template('index.html', user=current_user)
 
 
 # Маршрут Списка Вакансий (Шаг 23)
 @app.route('/jobs')
-@login_required # Только авторизованные пользователи могут видеть список
+@login_required
 def list_jobs():
-    # Получаем ВСЕ вакансии текущего пользователя, отсортированные по дате создания (см. модель User relationship)
-    user_vacancies = current_user.vacancies # Благодаря relationship и order_by в модели User
+    user_vacancies = current_user.vacancies # Вакансии уже отсортированы по дате создания по умолчанию
 
-    # Передаем список вакансий в шаблон
     return render_template('list_jobs.html', jobs=user_vacancies, user=current_user)
 
 
@@ -122,33 +188,99 @@ def create_job():
         db.session.commit()
 
         flash('Вакансия успешно создана!', 'success')
-        # Перенаправляем на страницу списка вакансий после создания
         return redirect(url_for('list_jobs'))
 
     return render_template('create_job.html', user=current_user)
 
 
-# --- НАЧАЛО НОВОГО КОДА: Маршрут Деталей Вакансии (Шаг 24) ---
-# Маршрут для просмотра деталей конкретной вакансии
-# <int:job_id> - означает, что часть URL будет целым числом (ID вакансии)
+# Маршрут для просмотра деталей конкретной вакансии (Шаг 24)
 @app.route('/jobs/<int:job_id>')
-@login_required # Только авторизованные пользователи могут видеть детали
+@login_required
 def view_job(job_id):
-    # Находим вакансию по ID. get_or_404() автоматически вернет страницу 404 Not Found,
-    # если вакансия с таким ID не существует.
     job = Vacancy.query.get_or_404(job_id)
 
-    # !!! ВАЖНАЯ ПРОВЕРКА: Убеждаемся, что текущий пользователь является автором этой вакансии !!!
-    # Это нужно, чтобы пользователь не мог посмотреть вакансии других пользователей,
-    # просто подставив другой ID в адресную строку.
+    # ВАЖНАЯ ПРОВЕРКА: Убеждаемся, что текущий пользователь является автором этой вакансии
     if job.user_id != current_user.id:
-        # Если пользователь не является автором, возвращаем ошибку 403 Forbidden (Запрещено)
-        # Необходимо импортировать abort из flask
-        abort(403) # Или можно перенаправить куда-то, или показать сообщение об ошибке
+        abort(403) # 403 Forbidden
 
-    # Передаем найденный объект вакансии в шаблон для отображения
+    # TODO: СЮДА ПОЗЖЕ ПОЛУЧАТЬ И ПЕРЕДАВАТЬ В ШАБЛОН СПИСОК КАНДИДАТОВ для этой вакансии
+    # Например: candidates = job.candidates # Благодаря relation в Vacancy
+    # return render_template('view_job.html', job=job, user=current_user, candidates=candidates)
+
+    # Временно передаем только job и user
     return render_template('view_job.html', job=job, user=current_user)
-# --- КОНЕЦ НОВОГО КОДА: Маршрут Деталей Вакансии (Шаг 24) ---
+
+
+# --- НАЧАЛО НОВОГО КОДА: Маршрут Загрузки Резюме (Шаг 26) ---
+# Маршрут для загрузки резюме для конкретной вакансии
+@app.route('/jobs/<int:job_id>/upload_resume', methods=['POST'])
+@login_required # Только авторизованные пользователи могут загружать
+def upload_resume(job_id):
+    # Находим вакансию по ID (ту же логику, что и в view_job)
+    job = Vacancy.query.get_or_404(job_id)
+
+    # ВАЖНАЯ ПРОВЕРКА: Убеждаемся, что текущий пользователь является автором этой вакансии
+    if job.user_id != current_user.id:
+        abort(403) # 403 Forbidden - Нельзя загружать резюме для чужой вакансии
+
+    # Проверяем, был ли файл вообще отправлен в запросе
+    if 'resume_file' not in request.files:
+        flash('Файл не был выбран.', 'error')
+        return redirect(url_for('view_job', job_id=job.id))
+
+    file = request.files['resume_file']
+
+    # Если пользователь не выбрал файл и форма пуста
+    if file.filename == '':
+        flash('Файл не был выбран.', 'error')
+        return redirect(url_for('view_job', job_id=job.id))
+
+    # Проверяем расширение файла
+    original_filename = secure_filename(file.filename) # Безопасно получаем имя файла
+    file_extension = get_file_extension(original_filename)
+
+    # Проверяем, поддерживается ли формат файла
+    if file_extension not in ['.pdf', '.docx']:
+        flash('Неподдерживаемый формат файла. Разрешены только .pdf и .docx.', 'error')
+        return redirect(url_for('view_job', job_id=job.id))
+
+    # --- Извлечение текста из файла ---
+    extracted_text = None
+    file_content = file.read() # Читаем содержимое файла в байты
+
+    if file_extension == '.pdf':
+        extracted_text = extract_text_from_pdf(file_content)
+    elif file_extension == '.docx':
+        extracted_text = extract_text_from_docx(file_content)
+
+    # Проверяем, успешно ли извлечен текст
+    if not extracted_text or len(extracted_text.strip()) == 0:
+        flash(f'Не удалось извлечь текст из файла {original_filename}.', 'error')
+        # !!! TODO: Логировать ошибку извлечения текста !!!
+        # В реальном приложении можно сохранить файл и попробовать позже или уведомить пользователя
+        return redirect(url_for('view_job', job_id=job.id))
+
+    # --- Сохранение кандидата в базу данных ---
+    # !!! TODO: Проверить на дубликаты по имени файла и вакансии, или добавить UUID !!!
+
+    new_candidate = Candidate(
+        vacancy_id=job.id, # Связываем кандидата с текущей вакансией
+        original_filename=original_filename,
+        extracted_text=extracted_text,
+        # storage_path= # TODO: Если нужно сохранять сам файл, указать путь
+        status='uploaded' # Начальный статус
+        # ai_score, keywords пока NULL
+    )
+
+    db.session.add(new_candidate)
+    db.session.commit()
+
+    flash(f'Резюме "{original_filename}" успешно загружено и текст извлечен!', 'success')
+
+    # !!! TODO: ТУТ ДОЛЖЕН ЗАПУСТИТЬСЯ ПРОЦЕСС AI-СКРИНИНГА ДЛЯ ЭТОГО КАНДИДАТА !!!
+
+    return redirect(url_for('view_job', job_id=job.id)) # Перенаправляем обратно на страницу деталей вакансии
+# --- КОНЕЦ НОВОГО КОДА: Маршрут Загрузки Резюме (Шаг 26) ---
 
 
 # Маршрут для РЕГИСТРАЦИИ (Шаг 19)
@@ -204,8 +336,7 @@ def login():
         if user and user.check_password(password):
             login_user(user)
             flash('Вы успешно вошли в систему!', 'success')
-            # Перенаправляем на страницу списка вакансий после входа
-            return redirect(url_for('list_jobs'))
+            return redirect(url_for('list_jobs')) # Перенаправляем на список вакансий после входа
 
         else:
             flash('Неверный email или пароль.', 'error')
@@ -257,5 +388,5 @@ def greet():
 
 # Этот блок запускает веб-сервер Flask для локальной разработки
 if __name__ == '__main__':
-    # База данных уже создана на шаге 18.2 (или пересоздана на шаге 21.2)
+    # База данных уже создана на шаге 18.2 (или пересоздана на шаге 21.2, 25.2)
     app.run(debug=True, host='0.0.0.0', port=5000)
