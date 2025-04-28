@@ -3,52 +3,85 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Адаптация Резюме с ИИ</title>
+    <title>Главная Страница SIPOK</title>
     <style>
         body { font-family: sans-serif; margin: 20px; }
-        textarea {
-            width: 95%; /* Ширина текстовых полей */
-            height: 150px; /* Высота текстовых полей */
-            margin-bottom: 15px; /* Отступ снизу */
+        .flash-messages { /* Стили для сообщений, скопированы из других шаблонов */
+            list-style: none;
+            padding: 0;
+            margin-bottom: 15px;
+        }
+        .flash-messages li {
             padding: 10px;
-            border: 1px solid #ccc;
-            box-sizing: border-box; /* Учитываем padding и border в ширине */
+            margin-bottom: 5px;
+            border-radius: 4px;
         }
-        button {
-            padding: 10px 20px;
-            font-size: 16px;
-            cursor: pointer;
+        .flash-messages .success {
+            background-color: #d4edda;
+            color: #155724;
+            border-color: #c3e6cb;
         }
-        #result {
-            margin-top: 20px;
-            padding: 15px;
-            border: 1px solid #eee;
-            background-color: #f9f9f9;
-            white-space: pre-wrap; /* Сохраняем переносы строк из текста */
-            word-wrap: break-word; /* Переносим длинные слова */
+        .flash-messages .error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border-color: #f5c6cb;
         }
-        .loading {
-            color: blue;
+         .info { /* Стиль для информационных сообщений от Flask-Login */
+            background-color: #cfe2ff;
+            color: #084298;
+            border-color: #b6d4fe;
         }
-        .error {
-            color: red;
-        }
+        .nav-links a { margin-right: 15px; }
     </style>
 </head>
 <body>
-    <h1>Адаптация Резюме с помощью ИИ</h1>
+    <h1>Добро пожаловать в SIPOK</h1>
 
-    <h2>Ваше Резюме</h2>
-    <textarea id="resumeInput" placeholder="Вставьте текст вашего резюме сюда"></textarea>
+    {# Сообщения от бэкенда #}
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            <ul class="flash-messages">
+            {% for category, message in messages %}
+                <li class="{{ category }}">{{ message }}</li>
+            {% endfor %}
+            </ul>
+        {% endif %}
+    {% endwith %}
 
-    <h2>Описание Вакансии</h2>
-    <textarea id="jobDescriptionInput" placeholder="Вставьте текст описания вакансии сюда"></textarea>
+    {# Навигационные ссылки в зависимости от статуса авторизации #}
+    <div class="nav-links">
+        {% if current_user.is_authenticated %}
+            {# Если пользователь вошел в систему #}
+            <p>Вы вошли как: {{ current_user.email }}</p>
+            <p>
+                {# Ссылка на страницу списка вакансий #}
+                <a href="{{ url_for('list_jobs') }}">Мои Вакансии</a>
+                {# TODO: Ссылка на страницу создания вакансии? Или сделать её доступной только со страницы списка? #}
+                 |
+                {# Ссылка на выход #}
+                <a href="{{ url_for('logout') }}">Выйти</a>
+            </p>
+        {% else %}
+            {# Если пользователь не вошел #}
+            <p>
+                {# Ссылка на страницу входа #}
+                <a href="{{ url_for('login') }}">Войти</a>
+                 |
+                {# Ссылка на страницу регистрации #}
+                <a href="{{ url_for('register') }}">Зарегистрироваться</a>
+            </p>
+        {% endif %}
+    </div>
 
-    <button id="adaptButton">Адаптировать Резюме</button>
-
-    <h2>Результат</h2>
-    <div id="result">Здесь появится адаптированное резюме.</div>
-
+    {# Этот блок пока оставим, он был из первого примера с AI, но его роль изменится #}
+    {# TODO: Решить, что будет на главной странице MVP - возможно, просто приветствие и ссылки #}
+    <h2>Демо AI Адаптации Резюме (Первый Пример)</h2>
+    <input type="text" id="nameInput" placeholder="Введите ваше имя (для старого примера)">
+    <button id="greetButton">Приветствовать (старый пример)</button>
+    <div id="result"></div>
+     {# Подключение старого скрипта - его нужно будет удалить, когда перейдем к реальной работе с резюме #}
     <script src="{{ url_for('static', filename='script.js') }}"></script>
+
+
 </body>
 </html>

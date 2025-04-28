@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Мои Вакансии</title>
+    <style>
+        body { font-family: sans-serif; margin: 20px; }
+        .job-item {
+            border: 1px solid #ccc;
+            padding: 10px;
+            margin-bottom: 10px;
+            border-radius: 4px;
+        }
+        .job-item h3 { margin-top: 0; margin-bottom: 5px; }
+        .job-item p { margin-bottom: 5px; font-size: 0.9em; color: #555; }
+        .no-jobs { font-style: italic; color: #777; }
+         .flash-messages { /* Стили для сообщений, скопированы из других шаблонов */
+            list-style: none;
+            padding: 0;
+            margin-bottom: 15px;
+        }
+        .flash-messages li {
+            padding: 10px;
+            margin-bottom: 5px;
+            border-radius: 4px;
+        }
+        .flash-messages .success {
+            background-color: #d4edda;
+            color: #155724;
+            border-color: #c3e6cb;
+        }
+        .flash-messages .error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border-color: #f5c6cb;
+        }
+         .info { /* Стиль для информационных сообщений от Flask-Login */
+            background-color: #cfe2ff;
+            color: #084298;
+            border-color: #b6d4fe;
+        }
+    </style>
+</head>
+<body>
+    <h1>Мои Вакансии</h1>
+
+     {# Сообщения от бэкенда #}
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            <ul class="flash-messages">
+            {% for category, message in messages %}
+                <li class="{{ category }}">{{ message }}</li>
+            {% endfor %}
+            </ul>
+        {% endif %}
+    {% endwith %}
+
+    {# Проверяем, есть ли вакансии #}
+    {% if jobs %}
+        {# Если список jobs не пустой, проходим по нему циклом #}
+        {% for job in jobs %}
+            <div class="job-item">
+                {# Отображаем название вакансии. TODO: Сделать ссылкой на страницу деталей #}
+                <h3>{{ job.title }}</h3>
+                {# Отображаем дату создания #}
+                <p>Создана: {{ job.created_at.strftime('%Y-%m-%d %H:%M') }}</p>
+                {# Здесь можно было бы показать часть описания или добавить кнопку/ссылку "Подробнее" #}
+                {# <p>{{ job.description[:150] }}...</p> #}
+                 {# TODO: Ссылка на страницу деталей вакансии, когда она будет реализована #}
+                 {# <a href="{{ url_for('view_job', job_id=job.id) }}">Подробнее</a> #}
+            </div>
+        {% endfor %}
+    {% else %}
+        {# Если список jobs пустой #}
+        <p class="no-jobs">У вас пока нет созданных вакансий.</p>
+    {% endif %}
+
+    <p>
+        {# Ссылка на страницу создания новой вакансии #}
+        <a href="{{ url_for('create_job') }}">Создать новую вакансию</a>
+         |
+        {# Ссылка на главную страницу #}
+        <a href="{{ url_for('index') }}">На главную</a>
+    </p>
+
+</body>
+</html>

@@ -19,7 +19,7 @@
             font-size: 16px;
             cursor: pointer;
         }
-        .flash-messages {
+        .flash-messages { /* Стили для сообщений */
             list-style: none;
             padding: 0;
             margin-bottom: 15px;
@@ -39,6 +39,11 @@
             color: #721c24;
             border-color: #f5c6cb;
         }
+         .info { /* Стиль для информационных сообщений */
+            background-color: #cfe2ff;
+            color: #084298;
+            border-color: #b6d4fe;
+        }
     </style>
 </head>
 <body>
@@ -55,7 +60,7 @@
         {% endif %}
     {% endwith %}
 
-    {# Форма для отправки данных входа методом POST на URL /login #}
+    {# Форма для отправки данных входа #}
     <form method="POST" action="{{ url_for('login') }}">
         <div>
             <label for="email">Email:</label>
@@ -65,11 +70,15 @@
             <label for="password">Пароль:</label>
             <input type="password" id="password" name="password" required>
         </div>
-        {# Можно добавить чекбокс "Запомнить меня", но для MVP пропустим #}
         <button type="submit">Войти</button>
     </form>
 
-    <p>Ещё не зарегистрированы? <a href="{{ url_for('register') }}">Зарегистрироваться</a></p> {# Ссылка на страницу регистрации #}
+    <p>
+        Ещё не зарегистрированы? <a href="{{ url_for('register') }}">Зарегистрироваться</a>
+         |
+        {# Ссылка на главную страницу #}
+        <a href="{{ url_for('index') }}">На главную</a>
+    </p>
 
 </body>
 </html>
